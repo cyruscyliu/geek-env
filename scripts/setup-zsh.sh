@@ -95,6 +95,20 @@ ensure_oh_my_zsh_layout() {
   mkdir -p "$ZSH_CUSTOM_DIR/themes" "$ZSH_CUSTOM_DIR/plugins" "$HOME/.zsh"
 }
 
+write_zshenv() {
+  local zshenv
+  zshenv="$HOME/.zshenv"
+
+  if [[ -f "$zshenv" && ! -f "${zshenv}.pre-geek-env" ]]; then
+    cp "$zshenv" "${zshenv}.pre-geek-env"
+    log "Backed up existing ~/.zshenv to ~/.zshenv.pre-geek-env"
+  fi
+
+  cat >"$zshenv" <<'EOF'
+skip_global_compinit=1
+EOF
+}
+
 write_zshrc() {
   local zshrc
   zshrc="$HOME/.zshrc"
@@ -107,11 +121,11 @@ write_zshrc() {
   cat >"$zshrc" <<EOF
 export ZSH_CUSTOM="${ZSH_CUSTOM_DIR}"
 export POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
+export PATH="$HOME/.local/bin:$PATH"
+export EDITOR="nvim"
+export VISUAL="nvim"
 
-autoload -Uz compinit
-compinit
-
-fpath=("$AUTOCOMPLETE_DIR" \$fpath)
+source "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh"
 
 source "$AUTOSUGGESTIONS_DIR/zsh-autosuggestions.zsh"
 source "$SYNTAX_HIGHLIGHTING_DIR/zsh-syntax-highlighting.zsh"
@@ -119,6 +133,8 @@ source "$P10K_DIR/powerlevel10k.zsh-theme"
 
 zstyle ':autocomplete:*' min-input 1
 zstyle ':autocomplete:*' recent-dirs yes
+
+alias vim='nvim'
 
 [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
 EOF
@@ -175,6 +191,7 @@ main() {
   clone_or_update_repo https://github.com/marlonrichert/zsh-autocomplete.git "$AUTOCOMPLETE_DIR"
 
   write_zshrc
+  write_zshenv
   write_p10k_config
   set_default_shell
 

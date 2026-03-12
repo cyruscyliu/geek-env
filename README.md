@@ -47,6 +47,9 @@ Available components:
 - Re-running `./install.sh` works as an update pass.
 - Git-based tools are pulled forward and repo configs are re-applied.
 - Neovim Codex integration assumes `codex` is already on your `PATH`.
+- Use `nvim .` for the bundled editor setup. Plain `vim .` will not load the Neovim Codex integration.
+- The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
+- Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.10.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
 - The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.
 
