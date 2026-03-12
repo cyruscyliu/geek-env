@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+OH_MY_ZSH_DIR="${ZSH:-$HOME/.oh-my-zsh}"
 P10K_DIR="$ZSH_CUSTOM_DIR/themes/powerlevel10k"
 AUTOSUGGESTIONS_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
 SYNTAX_HIGHLIGHTING_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
@@ -91,6 +92,18 @@ clone_or_update_repo() {
   fi
 }
 
+install_oh_my_zsh() {
+  if [[ -d "$OH_MY_ZSH_DIR/.git" ]]; then
+    log "Updating oh-my-zsh"
+    git -C "$OH_MY_ZSH_DIR" pull --ff-only
+  elif [[ -d "$OH_MY_ZSH_DIR" ]]; then
+    log "Keeping existing oh-my-zsh directory at $OH_MY_ZSH_DIR"
+  else
+    log "Cloning oh-my-zsh"
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$OH_MY_ZSH_DIR"
+  fi
+}
+
 ensure_oh_my_zsh_layout() {
   mkdir -p "$ZSH_CUSTOM_DIR/themes" "$ZSH_CUSTOM_DIR/plugins" "$HOME/.zsh"
 }
@@ -119,17 +132,18 @@ write_zshrc() {
   fi
 
   cat >"$zshrc" <<EOF
+export ZSH="$OH_MY_ZSH_DIR"
 export ZSH_CUSTOM="${ZSH_CUSTOM_DIR}"
 export POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
 export PATH="$HOME/.local/bin:$PATH"
 export EDITOR="nvim"
 export VISUAL="nvim"
 
-source "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh"
+plugins=(git python sudo zsh-autosuggestions zsh-syntax-highlighting)
 
-source "$AUTOSUGGESTIONS_DIR/zsh-autosuggestions.zsh"
-source "$SYNTAX_HIGHLIGHTING_DIR/zsh-syntax-highlighting.zsh"
-source "$P10K_DIR/powerlevel10k.zsh-theme"
+ZSH_THEME="powerlevel10k/powerlevel10k"
+source "\$ZSH/oh-my-zsh.sh"
+source "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh"
 
 zstyle ':autocomplete:*' min-input 1
 zstyle ':autocomplete:*' recent-dirs yes
@@ -154,13 +168,17 @@ write_p10k_config() {
   cat >"$p10k" <<'EOF'
 # Minimal Powerlevel10k configuration.
 typeset -g POWERLEVEL9K_MODE=nerdfont-complete
-typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs)
+typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs prompt_char)
 typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status command_execution_time background_jobs time)
 typeset -g POWERLEVEL9K_PROMPT_ADD_NEWLINE=true
 typeset -g POWERLEVEL9K_MULTILINE_FIRST_PROMPT_PREFIX=""
-typeset -g POWERLEVEL9K_MULTILINE_LAST_PROMPT_PREFIX="❯ "
+typeset -g POWERLEVEL9K_MULTILINE_LAST_PROMPT_PREFIX=""
 typeset -g POWERLEVEL9K_SHORTEN_STRATEGY=truncate_to_unique
 typeset -g POWERLEVEL9K_TIME_FORMAT='%D{%H:%M}'
+typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VIINS_CONTENT_EXPANSION='> '
+typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VIINS_CONTENT_EXPANSION='! '
+typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VICMD_CONTENT_EXPANSION='< '
+typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VICMD_CONTENT_EXPANSION='< '
 EOF
 }
 
@@ -185,6 +203,7 @@ set_default_shell() {
 main() {
   install_packages
   install_font
+  install_oh_my_zsh
   ensure_oh_my_zsh_layout
 
   clone_or_update_repo https://github.com/romkatv/powerlevel10k.git "$P10K_DIR"
