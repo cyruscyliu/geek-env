@@ -26,6 +26,14 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+dir_is_empty() {
+  local dir
+  dir="$1"
+
+  [[ -d "$dir" ]] || return 0
+  [[ -z "$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]
+}
+
 detect_pkg_manager() {
   if command_exists apt-get; then
     echo "apt"
@@ -86,6 +94,8 @@ clone_or_update_repo() {
   if [[ -d "$target_dir/.git" ]]; then
     log "Updating $(basename "$target_dir")"
     git -C "$target_dir" pull --ff-only
+  elif [[ -d "$target_dir" ]] && ! dir_is_empty "$target_dir"; then
+    fail "$(basename "$target_dir") exists at $target_dir but is not a git checkout; move it aside and rerun."
   else
     log "Cloning $(basename "$target_dir")"
     git clone --depth=1 "$repo_url" "$target_dir"
@@ -93,11 +103,24 @@ clone_or_update_repo() {
 }
 
 install_oh_my_zsh() {
+  local framework_file temp_dir
+  framework_file="$OH_MY_ZSH_DIR/oh-my-zsh.sh"
+
   if [[ -d "$OH_MY_ZSH_DIR/.git" ]]; then
     log "Updating oh-my-zsh"
     git -C "$OH_MY_ZSH_DIR" pull --ff-only
-  elif [[ -d "$OH_MY_ZSH_DIR" ]]; then
+  elif [[ -f "$framework_file" ]]; then
     log "Keeping existing oh-my-zsh directory at $OH_MY_ZSH_DIR"
+  elif [[ -d "$OH_MY_ZSH_DIR" ]] && ! dir_is_empty "$OH_MY_ZSH_DIR"; then
+    log "Repairing partial oh-my-zsh directory at $OH_MY_ZSH_DIR"
+    temp_dir="$(mktemp -d)"
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$temp_dir"
+    rm -rf "$temp_dir/custom"
+    cp -a "$temp_dir/." "$OH_MY_ZSH_DIR/"
+    rm -rf "$temp_dir"
+  elif [[ -d "$OH_MY_ZSH_DIR" ]]; then
+    log "Cloning oh-my-zsh into existing empty directory"
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$OH_MY_ZSH_DIR"
   else
     log "Cloning oh-my-zsh"
     git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$OH_MY_ZSH_DIR"
@@ -142,8 +165,8 @@ export VISUAL="nvim"
 plugins=(git python sudo zsh-autosuggestions zsh-syntax-highlighting)
 
 ZSH_THEME="powerlevel10k/powerlevel10k"
-source "\$ZSH/oh-my-zsh.sh"
-source "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh"
+[[ -r "\$ZSH/oh-my-zsh.sh" ]] && source "\$ZSH/oh-my-zsh.sh"
+[[ -r "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh" ]] && source "$AUTOCOMPLETE_DIR/zsh-autocomplete.plugin.zsh"
 
 zstyle ':autocomplete:*' min-input 1
 zstyle ':autocomplete:*' recent-dirs yes
