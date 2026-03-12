@@ -1,5 +1,5 @@
 vim.api.nvim_create_autocmd("VimEnter", {
-  group = vim.api.nvim_create_augroup("geek_env_netrw", { clear = true }),
+  group = vim.api.nvim_create_augroup("geek_env_startup", { clear = true }),
   callback = function()
     local arg = vim.fn.argv(0)
 

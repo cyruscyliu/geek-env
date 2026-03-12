@@ -27,15 +27,22 @@ return {
       "L3MON4D3/LuaSnip",
       "saadparwaiz1/cmp_luasnip",
       "rafamadriz/friendly-snippets",
+      "SmiteshP/nvim-navic",
     },
     config = function()
       local cmp = require("cmp")
       local luasnip = require("luasnip")
+      local navic = require("nvim-navic")
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
       require("luasnip.loaders.from_vscode").lazy_load()
       require("mason").setup()
       require("mason-lspconfig").setup()
+      navic.setup({
+        highlight = true,
+        separator = " > ",
+        depth_limit = 5,
+      })
 
       cmp.setup({
         snippet = {
@@ -71,9 +78,13 @@ return {
         },
       })
 
-      local on_attach = function(_, bufnr)
+      local on_attach = function(client, bufnr)
         local map = function(keys, func, desc)
           vim.keymap.set("n", keys, func, { buffer = bufnr, desc = desc })
+        end
+
+        if client.server_capabilities.documentSymbolProvider then
+          navic.attach(client, bufnr)
         end
 
         map("gd", vim.lsp.buf.definition, "Go to definition")

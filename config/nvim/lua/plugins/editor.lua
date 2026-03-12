@@ -1,12 +1,56 @@
 return {
   {
-    "akinsho/toggleterm.nvim",
-    version = "*",
+    "nvim-neo-tree/neo-tree.nvim",
+    branch = "v3.x",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "MunifTanjim/nui.nvim",
+      "nvim-tree/nvim-web-devicons",
+    },
+    cmd = "Neotree",
+    keys = {
+      { "<leader>e", "<cmd>Neotree toggle filesystem left<cr>", desc = "Toggle explorer" },
+    },
     opts = {
-      direction = "vertical",
-      size = function()
-        return math.floor(vim.o.columns * 0.35)
-      end,
+      close_if_last_window = false,
+      popup_border_style = "rounded",
+      enable_git_status = true,
+      enable_diagnostics = true,
+      open_files_do_not_replace_types = {
+        "terminal",
+        "Trouble",
+        "qf",
+        "edgy",
+      },
+      filesystem = {
+        follow_current_file = {
+          enabled = true,
+          leave_dirs_open = false,
+        },
+        hijack_netrw_behavior = "open_default",
+        filtered_items = {
+          visible = true,
+          hide_dotfiles = false,
+          hide_gitignored = false,
+        },
+        window = {
+          position = "left",
+          width = 32,
+        },
+      },
+      default_component_configs = {
+        indent = {
+          with_expanders = true,
+          expander_collapsed = ">",
+          expander_expanded = "v",
+        },
+      },
+      window = {
+        mappings = {
+          ["l"] = "open",
+          ["h"] = "close_node",
+        },
+      },
     },
   },
   {

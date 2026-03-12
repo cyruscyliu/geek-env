@@ -48,10 +48,12 @@ Available components:
 - Git-based tools are pulled forward and repo configs are re-applied.
 - Neovim Codex integration assumes `codex` is already on your `PATH`.
 - Use `nvim .` for the bundled editor setup. Plain `vim .` will not load the Neovim Codex integration.
-- On startup, Neovim opens a four-pane layout: netrw tree on the left, editor in the middle, shell below the editor, and a protected Codex panel on the right.
-- Codex file opens are routed back into the main Neovim session, so the Codex panel stays intact.
+- On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left, editor in the middle, shell below, and Codex on the right.
+- Codex file opens are routed back into the main Neovim session using Neovim remote editing.
+- The UI uses a VS Code themed colorscheme, top buffer tabs, and winbar breadcrumbs.
 - The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
 - Keymaps: `<leader>e` toggles the file tree, `<leader>aa` toggles the Codex panel, `<leader>an` opens a new Codex panel, `<leader>at` toggles the shell panel, and `<leader>aT` opens a new shell panel.
+- Diagnostics and symbols: `<leader>xx` toggles the diagnostics panel, `<leader>xX` toggles diagnostics for the current buffer, `<leader>cs` toggles the symbols panel, and `<leader>cl` toggles the LSP locations panel.
 - Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.10.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
 - The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.

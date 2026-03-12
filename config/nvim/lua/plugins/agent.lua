@@ -1,12 +1,18 @@
 return {
   {
     "akinsho/toggleterm.nvim",
+    version = "*",
     opts = function(_, opts)
+      opts = opts or {}
       local Terminal = require("toggleterm.terminal").Terminal
-      local panel_width = math.max(48, math.floor(vim.o.columns * 0.35))
-      local panel_height = 14
-      local tree_width = 30
-      local panels = {}
+      opts.size = function(term)
+        if term.direction == "vertical" then
+          return math.floor(vim.o.columns * 0.32)
+        end
+        return math.floor(vim.o.lines * 0.25)
+      end
+      local codex
+      local shell
 
       local function ensure_server()
         if vim.v.servername ~= nil and vim.v.servername ~= "" then
@@ -18,219 +24,95 @@ return {
         return vim.fn.serverstart(server)
       end
 
-      local function focus_editor_window()
-        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-          local buf = vim.api.nvim_win_get_buf(win)
-          if vim.api.nvim_win_is_valid(win)
-            and not vim.w[win].geek_env_panel_kind
-            and vim.bo[buf].filetype ~= "netrw"
-          then
-            vim.api.nvim_set_current_win(win)
-            return true
-          end
-        end
-
-        vim.cmd("vsplit")
-        return true
-      end
-
-      local function redirect_normal_buffers()
-        local win = vim.api.nvim_get_current_win()
-        if not vim.api.nvim_win_is_valid(win) or not vim.w[win].geek_env_panel_kind then
-          return
-        end
-
-        local buf = vim.api.nvim_win_get_buf(win)
-        local kind = vim.w[win].geek_env_panel_kind
-        if kind == "tree" and vim.bo[buf].filetype == "netrw" then
-          return
-        end
-
-        if vim.bo[buf].buftype == "terminal" then
-          return
-        end
-
-        focus_editor_window()
-        vim.api.nvim_set_current_buf(buf)
-
-        local panel = panels[kind]
-        if panel and panel.bufnr and vim.api.nvim_buf_is_valid(panel.bufnr) then
-          vim.api.nvim_win_set_buf(win, panel.bufnr)
-        else
-          vim.cmd("bdelete")
-        end
-      end
-
-      local function protect_tree_window(win, bufnr)
-        if not win or not vim.api.nvim_win_is_valid(win) then
-          return
-        end
-
-        vim.wo[win].winfixbuf = true
-        vim.wo[win].winfixwidth = true
-        vim.api.nvim_win_set_width(win, tree_width)
-        vim.w[win].geek_env_panel_kind = "tree"
-        panels.tree = {
-          window = win,
-          bufnr = bufnr,
-        }
-      end
-
-      local function protect_terminal_window(term, kind)
-        if not term.window or not vim.api.nvim_win_is_valid(term.window) then
-          return
-        end
-
-        vim.wo[term.window].winfixbuf = true
-        vim.w[term.window].geek_env_panel_kind = kind
-        if kind == "codex" then
-          vim.wo[term.window].winfixwidth = true
-          vim.api.nvim_win_set_width(term.window, panel_width)
-        else
-          vim.wo[term.window].winfixheight = true
-          vim.api.nvim_win_set_height(term.window, panel_height)
-        end
-      end
-
-      local function make_remote_editor()
+      local function remote_editor_cmd()
         local server = ensure_server()
         return string.format("nvim --server %s --remote-tab-wait", vim.fn.shellescape(server))
       end
 
-      local function make_codex_cmd()
-        local remote_editor = make_remote_editor()
+      local function terminal_filetype(filetype)
+        return function(term)
+          if term.bufnr and vim.api.nvim_buf_is_valid(term.bufnr) then
+            vim.bo[term.bufnr].filetype = filetype
+          end
+        end
+      end
+
+      local function codex_cmd()
+        local editor = remote_editor_cmd()
         return string.format(
           "env EDITOR=%s VISUAL=%s codex",
-          vim.fn.shellescape(remote_editor),
-          vim.fn.shellescape(remote_editor)
+          vim.fn.shellescape(editor),
+          vim.fn.shellescape(editor)
         )
       end
 
-      local function open_tree_panel()
-        local editor_win = vim.api.nvim_get_current_win()
-        local existing_tree = panels.tree
-        if existing_tree
-          and existing_tree.window
-          and vim.api.nvim_win_is_valid(existing_tree.window)
-          and existing_tree.bufnr
-          and vim.api.nvim_buf_is_valid(existing_tree.bufnr)
-        then
-          return
+      local function get_codex()
+        if codex then
+          return codex
         end
 
-        local before = {}
-        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-          before[win] = true
-        end
-
-        vim.cmd("silent keepalt Lexplore")
-
-        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-          if not before[win] then
-            protect_tree_window(win, vim.api.nvim_win_get_buf(win))
-            break
-          end
-        end
-
-        if vim.api.nvim_win_is_valid(editor_win) then
-          vim.api.nvim_set_current_win(editor_win)
-        else
-          focus_editor_window()
-        end
+        codex = Terminal:new({
+          cmd = codex_cmd(),
+          direction = "vertical",
+          hidden = true,
+          close_on_exit = false,
+          on_open = terminal_filetype("codex_panel"),
+        })
+        return codex
       end
 
-      local function toggle_panel(term)
-        if not term:is_open() then
-          focus_editor_window()
+      local function get_shell()
+        if shell then
+          return shell
         end
-        term:toggle()
+
+        shell = Terminal:new({
+          cmd = vim.o.shell,
+          direction = "horizontal",
+          hidden = true,
+          close_on_exit = false,
+          on_open = terminal_filetype("shell_panel"),
+        })
+        return shell
       end
-
-      local codex = Terminal:new({
-        cmd = make_codex_cmd(),
-        direction = "vertical",
-        size = panel_width,
-        hidden = true,
-        close_on_exit = false,
-        on_open = function(term)
-          panels.codex = term
-          protect_terminal_window(term, "codex")
-        end,
-      })
-
-      local shell = Terminal:new({
-        cmd = vim.o.shell,
-        direction = "horizontal",
-        size = panel_height,
-        hidden = true,
-        close_on_exit = false,
-        on_open = function(term)
-          panels.shell = term
-          protect_terminal_window(term, "shell")
-        end,
-      })
 
       vim.api.nvim_create_user_command("CodexToggle", function()
-        toggle_panel(codex)
-      end, { desc = "Toggle Codex terminal" })
+        get_codex():toggle()
+      end, { desc = "Toggle Codex panel" })
 
       vim.api.nvim_create_user_command("CodexNew", function()
-        focus_editor_window()
         Terminal:new({
-          cmd = make_codex_cmd(),
+          cmd = codex_cmd(),
           direction = "vertical",
-          size = panel_width,
-          close_on_exit = false,
           hidden = true,
-          on_open = function(term)
-            protect_terminal_window(term, "codex")
-          end,
+          close_on_exit = false,
+          on_open = terminal_filetype("codex_panel"),
         }):toggle()
-      end, { desc = "Open a new Codex terminal" })
+      end, { desc = "Open a new Codex panel" })
 
       vim.api.nvim_create_user_command("TerminalToggle", function()
-        toggle_panel(shell)
-      end, { desc = "Toggle shell terminal" })
+        get_shell():toggle()
+      end, { desc = "Toggle shell panel" })
 
       vim.api.nvim_create_user_command("TerminalNew", function()
-        focus_editor_window()
         Terminal:new({
           cmd = vim.o.shell,
           direction = "horizontal",
-          size = panel_height,
-          close_on_exit = false,
           hidden = true,
-          on_open = function(term)
-            protect_terminal_window(term, "shell")
-          end,
+          close_on_exit = false,
+          on_open = terminal_filetype("shell_panel"),
         }):toggle()
-      end, { desc = "Open a new shell terminal" })
-
-      vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
-        group = vim.api.nvim_create_augroup("geek_env_protected_panels", { clear = true }),
-        callback = redirect_normal_buffers,
-      })
+      end, { desc = "Open a new shell panel" })
 
       vim.api.nvim_create_autocmd("VimEnter", {
-        group = vim.api.nvim_create_augroup("geek_env_codex", { clear = true }),
+        group = vim.api.nvim_create_augroup("geek_env_layout", { clear = true }),
         once = true,
         callback = function()
           vim.schedule(function()
             ensure_server()
-            local editor_win = vim.api.nvim_get_current_win()
-            open_tree_panel()
-            if vim.api.nvim_win_is_valid(editor_win) then
-              vim.api.nvim_set_current_win(editor_win)
-            else
-              focus_editor_window()
-            end
-            codex:open()
-            focus_editor_window()
-            shell:open()
-            if vim.api.nvim_win_is_valid(editor_win) then
-              vim.api.nvim_set_current_win(editor_win)
-            else
-              focus_editor_window()
+            local ok, edgy = pcall(require, "edgy")
+            if ok then
+              edgy.open()
             end
           end)
         end,
