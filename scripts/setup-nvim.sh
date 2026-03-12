@@ -41,10 +41,10 @@ install_packages() {
   case "$manager" in
     apt)
       sudo apt-get update
-      sudo apt-get install -y neovim git curl unzip gcc ripgrep fd-find python3-venv nodejs npm xclip
+      sudo apt-get install -y neovim git curl unzip gcc ripgrep fd-find python3-venv nodejs xclip
       ;;
     dnf)
-      sudo dnf install -y neovim git curl unzip gcc ripgrep fd-find python3-virtualenv nodejs npm xclip
+      sudo dnf install -y neovim git curl unzip gcc ripgrep fd-find python3-virtualenv nodejs xclip
       ;;
     brew)
       brew install neovim git curl unzip ripgrep fd node

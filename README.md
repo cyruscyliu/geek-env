@@ -47,6 +47,7 @@ Available components:
 - Re-running `./install.sh` works as an update pass.
 - Git-based tools are pulled forward and repo configs are re-applied.
 - Neovim Codex integration assumes `codex` is already on your `PATH`.
+- The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.
 
 ## License
