@@ -46,6 +46,17 @@ return {
         )
       end
 
+      local function shell_cmd()
+        local shell_path = vim.o.shell
+        local shell_name = vim.fn.fnamemodify(shell_path, ":t")
+
+        if shell_name == "zsh" or shell_name == "bash" then
+          return string.format("%s -i", vim.fn.shellescape(shell_path))
+        end
+
+        return vim.fn.shellescape(shell_path)
+      end
+
       local function get_codex()
         if codex then
           return codex
@@ -67,7 +78,7 @@ return {
         end
 
         shell = Terminal:new({
-          cmd = vim.o.shell,
+          cmd = shell_cmd(),
           direction = "horizontal",
           hidden = true,
           close_on_exit = false,
@@ -96,7 +107,7 @@ return {
 
       vim.api.nvim_create_user_command("TerminalNew", function()
         Terminal:new({
-          cmd = vim.o.shell,
+          cmd = shell_cmd(),
           direction = "horizontal",
           hidden = true,
           close_on_exit = false,
