@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_CONFIG_DIR="$REPO_ROOT/config/nvim"
-TARGET_CONFIG_DIR="$HOME/.config/nvim"
+TARGET_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
 LAZY_DIR="$DATA_DIR/lazy/lazy.nvim"
 LOCAL_BIN_DIR="$HOME/.local/bin"
@@ -122,21 +122,31 @@ ensure_supported_nvim() {
 
 backup_existing_config() {
   local backup_dir
+  local source_realpath
+  local target_realpath
 
-  if [[ ! -d "$TARGET_CONFIG_DIR" ]]; then
+  if [[ ! -e "$TARGET_CONFIG_DIR" && ! -L "$TARGET_CONFIG_DIR" ]]; then
+    return
+  fi
+
+  source_realpath="$(realpath "$SOURCE_CONFIG_DIR")"
+  target_realpath="$(realpath "$TARGET_CONFIG_DIR" 2>/dev/null || true)"
+
+  if [[ "$target_realpath" == "$source_realpath" ]]; then
+    log "Neovim config already points to repo source"
     return
   fi
 
   backup_dir="${TARGET_CONFIG_DIR}.pre-geek-env.$(date +%Y%m%d%H%M%S)"
-  cp -R "$TARGET_CONFIG_DIR" "$backup_dir"
+  mv "$TARGET_CONFIG_DIR" "$backup_dir"
   log "Backed up existing config to $backup_dir"
 }
 
 install_config() {
   mkdir -p "$(dirname "$TARGET_CONFIG_DIR")"
   rm -rf "$TARGET_CONFIG_DIR"
-  cp -R "$SOURCE_CONFIG_DIR" "$TARGET_CONFIG_DIR"
-  log "Installed Neovim config into $TARGET_CONFIG_DIR"
+  ln -s "$SOURCE_CONFIG_DIR" "$TARGET_CONFIG_DIR"
+  log "Linked Neovim config from $SOURCE_CONFIG_DIR to $TARGET_CONFIG_DIR"
 }
 
 bootstrap_lazy() {

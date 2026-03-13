@@ -29,47 +29,79 @@ return {
     keys = {
       { "<leader>e", "<cmd>Neotree toggle filesystem left<cr>", desc = "Toggle explorer" },
     },
-    opts = {
-      close_if_last_window = false,
-      popup_border_style = "rounded",
-      enable_git_status = true,
-      enable_diagnostics = true,
-      open_files_do_not_replace_types = {
-        "terminal",
-        "Trouble",
-        "qf",
-        "edgy",
-      },
-      filesystem = {
-        follow_current_file = {
-          enabled = true,
-          leave_dirs_open = false,
+    opts = function()
+      return {
+        close_if_last_window = false,
+        popup_border_style = "rounded",
+        enable_git_status = true,
+        enable_diagnostics = true,
+        open_files_do_not_replace_types = {
+          "terminal",
+          "Trouble",
+          "qf",
+          "edgy",
         },
-        hijack_netrw_behavior = "open_default",
-        filtered_items = {
-          visible = true,
-          hide_dotfiles = false,
-          hide_gitignored = false,
+        filesystem = {
+          follow_current_file = {
+            enabled = true,
+            leave_dirs_open = false,
+          },
+          use_libuv_file_watcher = true,
+          hijack_netrw_behavior = "open_default",
+          filtered_items = {
+            visible = true,
+            hide_dotfiles = false,
+            hide_gitignored = false,
+          },
+          window = {
+            position = "left",
+            width = 32,
+          },
+        },
+        default_component_configs = {
+          indent = {
+            with_expanders = true,
+            expander_collapsed = ">",
+            expander_expanded = "v",
+          },
         },
         window = {
-          position = "left",
-          width = 32,
+          mappings = {
+            ["l"] = "open",
+            ["h"] = "close_node",
+          },
         },
-      },
-      default_component_configs = {
-        indent = {
-          with_expanders = true,
-          expander_collapsed = ">",
-          expander_expanded = "v",
-        },
-      },
-      window = {
-        mappings = {
-          ["l"] = "open",
-          ["h"] = "close_node",
-        },
-      },
-    },
+      }
+    end,
+    config = function(_, opts)
+      require("neo-tree").setup(opts)
+
+      local group = vim.api.nvim_create_augroup("geek-env-neo-tree-refresh", { clear = true })
+
+      local function refresh_neo_tree()
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          local buf = vim.api.nvim_win_get_buf(win)
+          if vim.bo[buf].filetype == "neo-tree" then
+            vim.schedule(function()
+              vim.cmd("silent! Neotree refresh")
+            end)
+            return
+          end
+        end
+      end
+
+      vim.api.nvim_create_autocmd({
+        "BufAdd",
+        "BufDelete",
+        "BufWritePost",
+        "DirChanged",
+        "FocusGained",
+        "VimResume",
+      }, {
+        group = group,
+        callback = refresh_neo_tree,
+      })
+    end,
   },
   {
     "nvim-telescope/telescope.nvim",

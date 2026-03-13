@@ -46,6 +46,7 @@ Available components:
 - Existing user configs are backed up before replacement.
 - Re-running `./install.sh` works as an update pass.
 - Git-based tools are pulled forward and repo configs are re-applied.
+- The managed Neovim config is symlinked into `~/.config/nvim`, so repo edits show up there immediately.
 - Neovim Codex integration assumes `codex` is already on your `PATH`.
 - Use `nvim .` for the bundled editor setup. Plain `vim .` will not load the Neovim Codex integration.
 - On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left, editor in the middle, shell below, and Codex on the right.
