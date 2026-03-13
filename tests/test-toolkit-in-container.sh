@@ -54,7 +54,7 @@ main() {
   bash "$REPO_ROOT/install.sh" | tee "$SECOND_LOG"
 
   log "Running smoke test suite"
-  bash "$REPO_ROOT/scripts/smoke-test.sh" | tee "$SMOKE_LOG"
+  bash "$REPO_ROOT/tests/smoke-test.sh" | tee "$SMOKE_LOG"
 
   log "Asserting installed toolkit state"
   assert_file "$HOME/.zshrc"

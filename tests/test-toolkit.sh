@@ -12,7 +12,7 @@ log() {
 
 main() {
   log "Building Docker test image"
-  docker build -t "$IMAGE_NAME" -f "$REPO_ROOT/docker/toolkit-test.Dockerfile" "$REPO_ROOT"
+  docker build -t "$IMAGE_NAME" -f "$REPO_ROOT/tests/toolkit.Dockerfile" "$REPO_ROOT"
 
   log "Running toolkit integration test in Docker"
   docker run --rm \
@@ -23,7 +23,7 @@ main() {
     -v "$REPO_ROOT":/workspace \
     -w /workspace \
     "$IMAGE_NAME" \
-    bash /workspace/scripts/test-toolkit-in-container.sh
+    bash /workspace/tests/test-toolkit-in-container.sh
 }
 
 main "$@"

@@ -45,7 +45,7 @@ Available components:
 Use the Docker harness for a repeatable full-toolkit integration run:
 
 ```bash
-./scripts/test-toolkit.sh
+./tests/test-toolkit.sh
 ```
 
 This builds a disposable Debian container, runs `./install.sh` twice as a
@@ -58,7 +58,7 @@ configuration output.
 Use the smoke suite after an install or update pass:
 
 ```bash
-./scripts/smoke-test.sh
+./tests/smoke-test.sh
 ```
 
 It checks that the configured toolkit starts cleanly enough to catch obvious
