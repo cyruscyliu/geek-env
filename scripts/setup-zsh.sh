@@ -158,7 +158,7 @@ write_zshrc() {
 export ZSH="$OH_MY_ZSH_DIR"
 export ZSH_CUSTOM="${ZSH_CUSTOM_DIR}"
 export POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="\$HOME/.local/bin:\$PATH"
 export EDITOR="nvim"
 export VISUAL="nvim"
 
@@ -178,13 +178,13 @@ alias vim='nvim'
 typeset -g GEEK_ENV_LAST_COMMAND=""
 
 geek_env_capture_command() {
-  GEEK_ENV_LAST_COMMAND="$1"
+  GEEK_ENV_LAST_COMMAND="\$1"
 }
 
 geek_env_report_failure() {
-  local exit_code=$?
-  if (( exit_code != 0 )) && [[ -n "$GEEK_ENV_LAST_COMMAND" ]]; then
-    printf 'Command failed (%d): %s\n' "$exit_code" "$GEEK_ENV_LAST_COMMAND" >&2
+  local exit_code=\$?
+  if (( exit_code != 0 )) && [[ -n "\$GEEK_ENV_LAST_COMMAND" ]]; then
+    printf 'Command failed (%d): %s\n' "\$exit_code" "\$GEEK_ENV_LAST_COMMAND" >&2
   fi
 }
 
