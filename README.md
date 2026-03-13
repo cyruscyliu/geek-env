@@ -5,7 +5,7 @@ Bootstrap or refresh a Debian workstation from one cloned repo.
 ## What it installs
 
 - `zsh` with Meslo Nerd Font, `powerlevel10k`, and shell completion
-- `neovim` with Telescope, Treesitter, LSP, completion, and Codex
+- `neovim` with Telescope, Treesitter, Mason/LSP, project root detection, breadcrumbs, and Codex
 - `tmux` with TPM and a practical default config
 - `alacritty` configured to use the Nerd Font and match the rest of the theme
 - `i3wm` with a usable keyboard-driven config and `i3status`
@@ -50,11 +50,11 @@ Available components:
 - Use `nvim .` for the bundled editor setup. Plain `vim .` will not load the Neovim Codex integration.
 - On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left, editor in the middle, shell below, and Codex on the right.
 - Codex file opens are routed back into the main Neovim session using Neovim remote editing.
-- The UI uses a VS Code themed colorscheme, top buffer tabs, and winbar breadcrumbs.
+- The UI uses a VS Code themed colorscheme, top buffer tabs, and plugin-managed breadcrumbs.
 - The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
 - Keymaps: `<leader>e` toggles the file tree, `<leader>aa` toggles the Codex panel, `<leader>an` opens a new Codex panel, `<leader>at` toggles the shell panel, and `<leader>aT` opens a new shell panel.
 - Diagnostics and symbols: `<leader>xx` toggles the diagnostics panel, `<leader>xX` toggles diagnostics for the current buffer, `<leader>cs` toggles the symbols panel, and `<leader>cl` toggles the LSP locations panel.
-- Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.10.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
+- Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.11.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
 - The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.
 

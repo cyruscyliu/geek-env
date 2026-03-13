@@ -1,0 +1,9 @@
+# Neovim runtime artifacts
+.nvimlog
+*.swp
+*.swo
+
+# OS/editor metadata
+.DS_Store
+.idea/
+.vscode/

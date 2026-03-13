@@ -1,13 +1,12 @@
 return {
   {
-    "williamboman/mason.nvim",
+    "mason-org/mason.nvim",
     opts = {},
   },
   {
-    "williamboman/mason-lspconfig.nvim",
+    "WhoIsSethDaniel/mason-tool-installer.nvim",
     dependencies = {
-      "williamboman/mason.nvim",
-      "neovim/nvim-lspconfig",
+      "mason-org/mason.nvim",
     },
     opts = {
       ensure_installed = {
@@ -18,6 +17,28 @@ return {
         "pyright",
       },
     },
+  },
+  {
+    "mason-org/mason-lspconfig.nvim",
+    dependencies = {
+      "mason-org/mason.nvim",
+      "neovim/nvim-lspconfig",
+    },
+    opts = {
+      ensure_installed = {
+        "bashls",
+        "jsonls",
+        "lua_ls",
+        "marksman",
+        "pyright",
+      },
+      automatic_enable = true,
+    },
+  },
+  {
+    "folke/lazydev.nvim",
+    ft = "lua",
+    opts = {},
   },
   {
     "neovim/nvim-lspconfig",
@@ -36,12 +57,13 @@ return {
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
       require("luasnip.loaders.from_vscode").lazy_load()
-      require("mason").setup()
-      require("mason-lspconfig").setup()
       navic.setup({
         highlight = true,
         separator = " > ",
         depth_limit = 5,
+        lsp = {
+          auto_attach = true,
+        },
       })
 
       cmp.setup({
@@ -78,42 +100,32 @@ return {
         },
       })
 
-      local on_attach = function(client, bufnr)
-        local map = function(keys, func, desc)
-          vim.keymap.set("n", keys, func, { buffer = bufnr, desc = desc })
-        end
+      vim.api.nvim_create_autocmd("LspAttach", {
+        group = vim.api.nvim_create_augroup("geek_env_lsp_attach", { clear = true }),
+        callback = function(args)
+          local map = function(keys, func, desc)
+            vim.keymap.set("n", keys, func, { buffer = args.buf, desc = desc })
+          end
 
-        if client.server_capabilities.documentSymbolProvider then
-          navic.attach(client, bufnr)
-        end
-
-        map("gd", vim.lsp.buf.definition, "Go to definition")
-        map("gr", vim.lsp.buf.references, "Go to references")
-        map("K", vim.lsp.buf.hover, "Hover docs")
-        map("<leader>rn", vim.lsp.buf.rename, "Rename symbol")
-        map("<leader>ca", vim.lsp.buf.code_action, "Code action")
-      end
+          map("gd", vim.lsp.buf.definition, "Go to definition")
+          map("gr", vim.lsp.buf.references, "Go to references")
+          map("K", vim.lsp.buf.hover, "Hover docs")
+          map("<leader>rn", vim.lsp.buf.rename, "Rename symbol")
+          map("<leader>ca", vim.lsp.buf.code_action, "Code action")
+        end,
+      })
 
       local servers = {
         bashls = {},
         jsonls = {},
-        lua_ls = {
-          settings = {
-            Lua = {
-              diagnostics = { globals = { "vim" } },
-              workspace = { checkThirdParty = false },
-            },
-          },
-        },
+        lua_ls = {},
         marksman = {},
         pyright = {},
       }
 
       for server, server_opts in pairs(servers) do
         server_opts.capabilities = capabilities
-        server_opts.on_attach = on_attach
         vim.lsp.config(server, server_opts)
-        vim.lsp.enable(server)
       end
     end,
   },

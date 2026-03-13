@@ -12,7 +12,7 @@ LOCAL_BIN_DIR="$HOME/.local/bin"
 LOCAL_OPT_DIR="$HOME/.local/opt"
 LOCAL_NVIM_ROOT="$LOCAL_OPT_DIR/nvim-linux-x86_64"
 LOCAL_NVIM_BIN="$LOCAL_BIN_DIR/nvim"
-NVIM_MIN_VERSION="0.10.0"
+NVIM_MIN_VERSION="0.11.0"
 NVIM_TARBALL_URL="https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz"
 
 log() {

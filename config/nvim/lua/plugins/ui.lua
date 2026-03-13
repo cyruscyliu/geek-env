@@ -12,8 +12,31 @@ return {
     config = function(_, opts)
       require("vscode").setup(opts)
       vim.cmd.colorscheme("vscode")
-      vim.o.winbar = "%{%v:lua.require'config.winbar'.get()%}"
     end,
+  },
+  {
+    "utilyre/barbecue.nvim",
+    version = "*",
+    dependencies = {
+      "SmiteshP/nvim-navic",
+      "nvim-tree/nvim-web-devicons",
+    },
+    opts = {
+      create_autocmd = true,
+      attach_navic = false,
+      show_dirname = false,
+      exclude_filetypes = {
+        "Trouble",
+        "alpha",
+        "dashboard",
+        "lazy",
+        "neo-tree",
+        "toggleterm",
+      },
+      modifiers = {
+        dirname = ":~:.",
+      },
+    },
   },
   {
     "akinsho/bufferline.nvim",

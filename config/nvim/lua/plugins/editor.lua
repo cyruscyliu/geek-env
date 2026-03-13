@@ -1,5 +1,23 @@
 return {
   {
+    "ahmedkhalf/project.nvim",
+    main = "project_nvim",
+    lazy = false,
+    opts = {
+      manual_mode = false,
+      detection_methods = { "pattern", "lsp" },
+      patterns = {
+        ".git",
+        "package.json",
+        "pyproject.toml",
+        "Cargo.toml",
+        "Makefile",
+      },
+      silent_chdir = true,
+      scope_chdir = "global",
+    },
+  },
+  {
     "nvim-neo-tree/neo-tree.nvim",
     branch = "v3.x",
     dependencies = {
@@ -87,7 +105,7 @@ return {
       indent = { enable = true },
     },
     config = function(_, opts)
-      require("nvim-treesitter").setup(opts)
+      require("nvim-treesitter.configs").setup(opts)
     end,
   },
   {
