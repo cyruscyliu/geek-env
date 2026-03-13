@@ -84,6 +84,7 @@ return {
   },
   {
     "nvim-treesitter/nvim-treesitter",
+    lazy = false,
     build = ":TSUpdate",
     opts = {
       ensure_installed = {
@@ -105,7 +106,44 @@ return {
       indent = { enable = true },
     },
     config = function(_, opts)
-      require("nvim-treesitter.configs").setup(opts)
+      local ok_configs, configs = pcall(require, "nvim-treesitter.configs")
+      if ok_configs then
+        configs.setup(opts)
+        return
+      end
+
+      local ok_ts, ts = pcall(require, "nvim-treesitter")
+      if not ok_ts then
+        vim.notify("nvim-treesitter is not available", vim.log.levels.ERROR)
+        return
+      end
+
+      if ts.setup then
+        ts.setup({})
+      end
+
+      local languages = opts.ensure_installed or {}
+      if #languages > 0 and ts.install then
+        ts.install(languages)
+      end
+
+      if opts.highlight and opts.highlight.enable then
+        vim.api.nvim_create_autocmd("FileType", {
+          group = vim.api.nvim_create_augroup("geek-env-treesitter-highlight", { clear = true }),
+          callback = function(event)
+            pcall(vim.treesitter.start, event.buf)
+          end,
+        })
+      end
+
+      if opts.indent and opts.indent.enable and ts.indentexpr then
+        vim.api.nvim_create_autocmd("FileType", {
+          group = vim.api.nvim_create_augroup("geek-env-treesitter-indent", { clear = true }),
+          callback = function(event)
+            vim.bo[event.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+          end,
+        })
+      end
     end,
   },
   {
