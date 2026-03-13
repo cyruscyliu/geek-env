@@ -1,5 +1,6 @@
 # Neovim runtime artifacts
 .nvimlog
+config/nvim/lazy-lock.json
 *.swp
 *.swo
 
