@@ -175,6 +175,23 @@ bindkey '^F' autosuggest-accept
 
 alias vim='nvim'
 
+typeset -g GEEK_ENV_LAST_COMMAND=""
+
+geek_env_capture_command() {
+  GEEK_ENV_LAST_COMMAND="$1"
+}
+
+geek_env_report_failure() {
+  local exit_code=$?
+  if (( exit_code != 0 )) && [[ -n "$GEEK_ENV_LAST_COMMAND" ]]; then
+    printf 'Command failed (%d): %s\n' "$exit_code" "$GEEK_ENV_LAST_COMMAND" >&2
+  fi
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec geek_env_capture_command
+add-zsh-hook precmd geek_env_report_failure
+
 [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
 EOF
 }
