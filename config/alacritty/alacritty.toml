@@ -1,3 +1,6 @@
+[general]
+live_config_reload = true
+
 [env]
 TERM = "xterm-256color"
 
@@ -8,7 +11,7 @@ decorations = "Full"
 opacity = 0.96
 
 [font]
-size = __GEEK_ENV_ALACRITTY_FONT_SIZE__
+size = 10.0
 
 [font.normal]
 family = "MesloLGS NF"
@@ -22,14 +25,25 @@ style = "Bold"
 family = "MesloLGS NF"
 style = "Italic"
 
+[font.offset]
+x = 0
+y = 1
+
 [selection]
 save_to_clipboard = true
 
 [scrolling]
 history = 50000
+multiplier = 3
 
 [cursor]
 style = { shape = "Block", blinking = "On" }
+blink_interval = 500
+blink_timeout = 5
+unfocused_hollow = true
+
+[mouse]
+hide_when_typing = true
 
 [colors.primary]
 background = "#1e1e2e"
@@ -57,7 +71,21 @@ white = "#a6adc8"
 
 [keyboard]
 bindings = [
-  { key = "N", mods = "Control|Shift", action = "CreateNewWindow" },
-  { key = "V", mods = "Control|Shift", action = "Paste" },
-  { key = "C", mods = "Control|Shift", action = "Copy" },
+  # Alacritty
+  { key = "N",      mods = "Control|Shift", action = "CreateNewWindow" },
+  { key = "V",      mods = "Control|Shift", action = "Paste" },
+  { key = "C",      mods = "Control|Shift", action = "Copy" },
+  { key = "Equals", mods = "Control",       action = "IncreaseFontSize" },
+  { key = "Minus",  mods = "Control",       action = "DecreaseFontSize" },
+  { key = "Key0",   mods = "Control",       action = "ResetFontSize" },
+  # Tmux splits (sends Ctrl+Space then the split key)
+  { key = "D",      mods = "Control|Shift", chars = "\u0000|" },
+  { key = "D",      mods = "Control",       chars = "\u0000-" },
+  # Tmux pane navigation
+  { key = "H",      mods = "Control|Shift", chars = "\u0000h" },
+  { key = "J",      mods = "Control|Shift", chars = "\u0000j" },
+  { key = "K",      mods = "Control|Shift", chars = "\u0000k" },
+  { key = "L",      mods = "Control|Shift", chars = "\u0000l" },
+  # Tmux new window / tab
+  { key = "T",      mods = "Control|Shift", chars = "\u0000c" },
 ]

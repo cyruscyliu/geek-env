@@ -78,7 +78,7 @@ Alacritty config parsing, and installed `zram` configuration.
 - Tree-sitter is loaded eagerly at startup, and the config falls back to direct parser setup if `nvim-treesitter.configs` is unavailable.
 - The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
 - SSH sessions use a plain ASCII `zsh` prompt instead of the Nerd Font `powerlevel10k` prompt to avoid broken glyphs on remote hosts.
-- The Alacritty installer computes a smaller default font size from the detected display height when `xrandr` is available, and otherwise falls back to `11.5`. Set `GEEK_ENV_ALACRITTY_FONT_SIZE` to override it explicitly.
+- The Alacritty installer computes the font size from the detected display height when `xrandr` is available, falling back to `10.0` for unknown or headless environments.
 - Keymaps: `<leader>e` toggles the file tree, `<S-h>`/`<S-l>` cycle buffers, `s` triggers flash jump, `<leader>cf` formats the buffer.
 - Git: `]h`/`[h` navigate hunks, `<leader>hs` stages a hunk, `<leader>hp` previews, `<leader>hb` shows blame.
 - Text objects: `af`/`if` select functions, `ac`/`ic` select classes, `aa`/`ia` select arguments; `]f`/`[f` jump between functions.

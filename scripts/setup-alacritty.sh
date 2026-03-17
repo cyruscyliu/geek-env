@@ -50,29 +50,23 @@ install_packages() {
 
 compute_font_size() {
   local height
-
-  if [[ -n "${GEEK_ENV_ALACRITTY_FONT_SIZE:-}" ]]; then
-    printf '%s\n' "$GEEK_ENV_ALACRITTY_FONT_SIZE"
-    return
-  fi
-
   height="$(detect_display_height || true)"
 
   case "$height" in
     ''|*[!0-9]*)
-      printf '11.5\n'
+      printf '10.0\n'
       ;;
     *)
       if (( height >= 2160 )); then
-        printf '14.0\n'
-      elif (( height >= 1800 )); then
         printf '13.0\n'
-      elif (( height >= 1440 )); then
-        printf '12.0\n'
-      elif (( height >= 1200 )); then
+      elif (( height >= 1800 )); then
         printf '11.5\n'
-      else
+      elif (( height >= 1440 )); then
         printf '11.0\n'
+      elif (( height >= 1080 )); then
+        printf '10.0\n'
+      else
+        printf '9.5\n'
       fi
       ;;
   esac
@@ -106,7 +100,7 @@ install_config() {
   rm -rf "$TARGET_CONFIG_DIR"
   mkdir -p "$TARGET_CONFIG_DIR"
   font_size="$(compute_font_size)"
-  sed "s/__GEEK_ENV_ALACRITTY_FONT_SIZE__/${font_size}/g" "$source_file" >"$target_file"
+  sed "s/^size = .*/size = ${font_size}/" "$source_file" >"$target_file"
   log "Installed Alacritty config into $TARGET_CONFIG_DIR with font size $font_size"
 }
 
