@@ -8,3 +8,6 @@ config/nvim/lazy-lock.json
 .DS_Store
 .idea/
 .vscode/
+
+# K3S kata configs
+agents

@@ -10,6 +10,7 @@ Bootstrap or refresh a Debian workstation from one cloned repo.
 - `alacritty` configured to use the Nerd Font, match the rest of the theme, and forward tmux split and window shortcuts
 - `i3wm` with a usable keyboard-driven config and `i3status`
 - ZRAM-backed swap using `zstd`
+- optional `k3s` + Kata Containers scripts for isolated coding-agent VMs
 
 ## Fresh Debian flow
 
@@ -39,6 +40,10 @@ Available components:
 - `alacritty`
 - `i3`
 - `zram`
+
+The repository also includes `scripts/setup-k3s-kata.sh` and
+`scripts/new-agent.sh` for single-node k3s + Kata agent workloads. See
+`README.k3s-kata.md` for that flow.
 
 ## Docker test
 
@@ -90,6 +95,9 @@ Alacritty config parsing, and installed `zram` configuration.
 - Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.11.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
 - The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.
+- `scripts/new-agent.sh` now waits up to 15 minutes for a fresh Kata agent pod
+  to become ready and prints pod status, `describe`, and recent logs when a
+  deployment stalls instead of leaving you with an opaque rollout wait.
 
 ## License
 
