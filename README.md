@@ -1,104 +1,64 @@
-# geek-env
+# Agent Vault
 
-Bootstrap or refresh a Debian workstation from one cloned repo.
+Run coding agents in VM-backed sandboxes, switch on permissive mode, and let
+them ship without constant approval babysitting.
 
-## What it installs
+![Platform](https://img.shields.io/badge/platform-k3s-blue)
+![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
+![Agent](https://img.shields.io/badge/agent-Codex%20%7C%20Claude%20Code-0a7ea4)
+![Shell](https://img.shields.io/badge/shell-tmux%20%7C%20zsh%20%7C%20Neovim-2ea44f)
+![License](https://img.shields.io/badge/license-MIT-black)
 
-- `zsh` with Meslo Nerd Font, `powerlevel10k`, and shell completion
-- `neovim` with blink.cmp, Telescope, Treesitter, Mason/LSP, gitsigns, conform, flash, and breadcrumbs
-- `tmux` with TPM, a practical default config, top status bar, vi-style copy mode, and copy-mode-safe window navigation
-- `alacritty` configured to use the Nerd Font, match the rest of the theme, and forward tmux split and window shortcuts
-- `i3wm` with a usable keyboard-driven config and `i3status`
-- ZRAM-backed swap using `zstd`
-- optional `k3s` + Kata Containers scripts for isolated coding-agent VMs
+## Description
 
-## Fresh Debian flow
+Agent Vault turns this repo into a single-node control plane for isolated coding
+agents. It provisions k3s plus Kata Containers on Debian, then launches each
+agent in its own Kubernetes namespace with a mounted workspace, tmux session,
+and repo-managed shell/editor environment.
+
+## Quick Start
 
 ```bash
-git clone <your-repo-url> ~/geek-env
-cd ~/geek-env
-./install.sh
+grep -c vmx /proc/cpuinfo
+sudo bash scripts/setup-k3s-kata.sh
+bash scripts/new-agent.sh
 ```
 
-This is the primary flow on Debian. The installer runs each setup
-script in order and reapplies the repo configs into your home
-directory.
+Recommended first vault:
 
-## Partial installs
+- runtime: `kata-qemu`
+- image: `debian:trixie-slim`
+- agent: `OpenAI Codex`
+- deploy: `yes`
 
-You can also install a subset:
+To re-enter or manage it later:
 
 ```bash
-./install.sh zsh nvim tmux
+bash scripts/new-agent.sh <project>
 ```
 
-Available components:
+For tool-specific usage details, see:
 
-- `zsh`
-- `nvim`
-- `tmux`
-- `alacritty`
-- `i3`
-- `zram`
+- [`README.k3s-kata.md`](README.k3s-kata.md)
+- [`README.tmux.md`](README.tmux.md)
+- [`README.alacritty.md`](README.alacritty.md)
+- [`README.vim.md`](README.vim.md)
 
-The repository also includes `scripts/setup-k3s-kata.sh` and
-`scripts/new-agent.sh` for single-node k3s + Kata agent workloads. See
-`README.k3s-kata.md` for that flow.
+## Contribute
 
-## Docker test
-
-Use the Docker harness for a repeatable full-toolkit integration run:
+- keep Bash scripts idempotent and explicit
+- use `set -euo pipefail`
+- update docs when behavior changes
+- validate with:
 
 ```bash
-./tests/test-toolkit.sh
-```
-
-This builds a disposable Debian container, runs `./install.sh` twice as a
-normal user with passwordless `sudo`, and verifies the installed state for
-`zsh`, `nvim`, `tmux`, `alacritty`, `i3`, and container-safe `zram`
-configuration output.
-
-## Smoke test
-
-Use the smoke suite after an install or update pass:
-
-```bash
+bash -n scripts/new-agent.sh scripts/setup-k3s-kata.sh
 ./tests/smoke-test.sh
 ```
 
-It checks that the configured toolkit starts cleanly enough to catch obvious
-breakage: interactive `zsh`, headless `nvim`, `tmux`, `i3` config validation,
-Alacritty config parsing, and installed `zram` configuration.
-
-## Notes
-
-- Most setup steps use `sudo` for packages and system config.
-- Existing user configs are backed up before replacement.
-- Re-running `./install.sh` works as an update pass.
-- Git-based tools are pulled forward and repo configs are re-applied.
-- The `zsh` installer skips the Meslo Nerd Font download when it is already installed.
-- Local font discovery on this machine resolves `MesloLGS Nerd Font` cleanly; managed Alacritty and i3 configs use that family name rather than `MesloLGS NF`.
-- The managed Neovim config is symlinked into `~/.config/nvim`, so repo edits show up there immediately.
-- On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left and editor in the middle.
-- The UI uses a VS Code themed colorscheme, top buffer tabs, and plugin-managed breadcrumbs.
-- Tree-sitter is loaded eagerly at startup, and the config falls back to direct parser setup if `nvim-treesitter.configs` is unavailable.
-- The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
-- SSH sessions use a plain ASCII `zsh` prompt instead of the Nerd Font `powerlevel10k` prompt to avoid broken glyphs on remote hosts.
-- The Alacritty installer computes the font size from the detected display height when `xrandr` is available, falling back to `10.0` for unknown or headless environments.
-- Tmux uses `Ctrl+Space` as the prefix, vi-style copy mode, and binds `p` / `n` to previous / next window even while copy mode is active.
-- Alacritty forwards tmux shortcuts directly: `Ctrl+Shift+D` splits vertically, `Ctrl+D` splits horizontally, `Ctrl+Shift+H/J/K/L` moves between panes, `Ctrl+Shift+T` opens a new tmux window, `Ctrl+Shift+Left` / `Ctrl+Shift+Right` switch windows, and `Ctrl+Shift+S` opens the tmux session list.
-- Keymaps: `<leader>e` toggles the file tree, `<S-h>`/`<S-l>` cycle buffers, `s` triggers flash jump, `<leader>cf` formats the buffer.
-- Git: `]h`/`[h` navigate hunks, `<leader>hs` stages a hunk, `<leader>hp` previews, `<leader>hb` shows blame.
-- Text objects: `af`/`if` select functions, `ac`/`ic` select classes, `aa`/`ia` select arguments; `]f`/`[f` jump between functions.
-- Diagnostics and symbols: `<leader>xx` toggles the diagnostics panel, `<leader>xX` toggles diagnostics for the current buffer, `<leader>cs` toggles the symbols panel, and `<leader>cl` toggles the LSP locations panel.
-- Formatting: conform.nvim formats on save using `shfmt` (shell), `stylua` (Lua), `black` (Python), and `prettier` (JS/TS/JSON/YAML/Markdown). Formatters are installed on demand via Mason.
-- Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.11.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
-- The Neovim setup installs the Node.js runtime but does not require `npm`.
-- Debian is the main target, even if some scripts have other branches.
-- `scripts/new-agent.sh` now waits up to 15 minutes for a fresh Kata agent pod
-  to become ready and prints pod status, `describe`, and recent logs when a
-  deployment stalls instead of leaving you with an opaque rollout wait.
+If you change command flow or generated manifests, update the relevant usage
+docs under the README files in the repo root.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
