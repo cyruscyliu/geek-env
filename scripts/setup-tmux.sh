@@ -3,10 +3,12 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_TMUX_CONF="$REPO_ROOT/config/tmux/.tmux.conf"
-TARGET_TMUX_CONF="$HOME/.tmux.conf"
-TPM_DIR="$HOME/.tmux/plugins/tpm"
+DEFAULT_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="${REPO_ROOT:-$DEFAULT_REPO_ROOT}"
+SOURCE_TMUX_CONF="${SOURCE_TMUX_CONF:-$REPO_ROOT/config/tmux/.tmux.conf}"
+TARGET_TMUX_CONF="${TARGET_TMUX_CONF:-$HOME/.tmux.conf}"
+TPM_DIR="${TPM_DIR:-$HOME/.tmux/plugins/tpm}"
+SKIP_PACKAGE_INSTALL="${SKIP_PACKAGE_INSTALL:-0}"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -78,7 +80,9 @@ install_plugins() {
 }
 
 main() {
-  install_packages
+  if [[ "$SKIP_PACKAGE_INSTALL" != "1" ]]; then
+    install_packages
+  fi
   install_config
   install_tpm
   install_plugins

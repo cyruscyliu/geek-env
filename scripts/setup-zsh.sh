@@ -11,6 +11,8 @@ SYNTAX_HIGHLIGHTING_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
 FONT_VERSION="v3.4.0"
 FONT_ARCHIVE="Meslo.zip"
 FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/${FONT_VERSION}/${FONT_ARCHIVE}"
+SKIP_FONT_INSTALL="${SKIP_FONT_INSTALL:-0}"
+SKIP_DEFAULT_SHELL_CHANGE="${SKIP_DEFAULT_SHELL_CHANGE:-0}"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -85,6 +87,11 @@ meslo_nerd_font_installed() {
 
 install_font() {
   local fonts_dir archive_path
+
+  if [[ "$SKIP_FONT_INSTALL" == "1" ]]; then
+    log "Skipping font installation"
+    return
+  fi
 
   if meslo_nerd_font_installed; then
     log "Meslo Nerd Font already installed; skipping download"
@@ -238,6 +245,11 @@ set_default_shell() {
   local zsh_path current_shell
   zsh_path="$(command -v zsh)"
   current_shell="${SHELL:-}"
+
+  if [[ "$SKIP_DEFAULT_SHELL_CHANGE" == "1" ]]; then
+    log "Skipping login shell change"
+    return
+  fi
 
   if [[ "${GEEK_ENV_TEST_MODE:-0}" == "1" ]]; then
     log "Test mode enabled; skipping login shell change"

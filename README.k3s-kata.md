@@ -132,6 +132,10 @@ Optional additional toolchains (select by number, Enter keeps defaults):
 | `build-essential` | gcc, make, etc. |
 
 You can also enter extra apt packages at the free-form prompt.
+When `OpenAI Codex` is selected, `bubblewrap` is also auto-installed.
+The container bootstrap also reuses this repo's `setup-zsh.sh`,
+`setup-nvim.sh`, and `setup-tmux.sh` scripts from a read-only mount of the
+host `geek-env` checkout. `setup-alacritty.sh` is not run in the container.
 
 #### [5/8] Resource limits
 
@@ -169,6 +173,8 @@ Choose the coding agent to install:
    the host auth file and injects it as a secret env var.
 5. If neither can be read automatically you are prompted to paste
    `OPENAI_API_KEY` manually.
+6. The generated tmux launch runs Codex with
+   `--dangerously-bypass-approvals-and-sandbox`.
 
 If the agent CLI is not installed on the host, the wizard warns you and lets
 you add the key manually. Install it with:

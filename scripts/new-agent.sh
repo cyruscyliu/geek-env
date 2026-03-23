@@ -9,6 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/../agents"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BOLD="\e[1m"
 CYAN="\e[36m"
@@ -586,6 +587,7 @@ case "$AGENT" in
     "OpenAI Codex"*)
         AGENT_PKG="@openai/codex"
         AGENT_CMD="codex"
+        AGENT_ARGS="--dangerously-bypass-approvals-and-sandbox"
         AGENT_KEY_NAME="OPENAI_API_KEY"
         ;;
 esac
@@ -705,6 +707,11 @@ if [[ -n "$AGENT_PKG" && "$TOOLCHAINS" != *"nodejs"* ]]; then
     TOOLCHAINS="${TOOLCHAINS:+$TOOLCHAINS }nodejs npm"
 fi
 
+# Codex relies on bubblewrap inside the container sandbox
+if [[ "$AGENT_CMD" == "codex" ]] && [[ "$EXTRA_PACKAGES" != *"bubblewrap"* ]]; then
+    EXTRA_PACKAGES="${EXTRA_PACKAGES:+$EXTRA_PACKAGES }bubblewrap"
+fi
+
 # Rustup is not an apt package — install via curl; strip from apt list
 INSTALL_RUSTUP=false
 if [[ "$TOOLCHAINS" == *"rustup"* ]]; then
@@ -726,6 +733,14 @@ AGENT_INSTALL_LINE=""
 if [[ -n "$AGENT_PKG" ]]; then
     AGENT_INSTALL_LINE="npm install -g ${AGENT_PKG} && \\"$'\n'"          "
 fi
+
+USER_SETUP_LINE=$(
+cat <<'EOF'
+su - agent -c "REPO_ROOT=/opt/geek-env SKIP_FONT_INSTALL=1 SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \
+          su - agent -c "REPO_ROOT=/opt/geek-env /opt/geek-env/scripts/setup-nvim.sh" && \
+          su - agent -c "REPO_ROOT=/opt/geek-env SKIP_PACKAGE_INSTALL=1 /opt/geek-env/scripts/setup-tmux.sh" && \
+EOF
+)
 
 # ────────────────────────────────────────────────
 # Generate YAML
@@ -811,7 +826,7 @@ spec:
           mkdir -p /etc/sudoers.d && \\
           echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\
           chmod 440 /etc/sudoers.d/agent && \\
-          ${RUSTUP_INSTALL_LINE}${AGENT_INSTALL_LINE}touch /tmp/.ready && sleep infinity
+          ${USER_SETUP_LINE}${RUSTUP_INSTALL_LINE}${AGENT_INSTALL_LINE}touch /tmp/.ready && sleep infinity
         readinessProbe:
           exec:
             command: ["test", "-f", "/tmp/.ready"]
@@ -826,6 +841,9 @@ spec:
         volumeMounts:
         - name: project
           mountPath: ${MOUNT_PATH}
+        - name: geek-env
+          mountPath: /opt/geek-env
+          readOnly: true
 $(if [[ -n "$AGENT_SECRET_CONTENT" ]]; then
 echo "        - name: agent-auth"
 echo "          mountPath: ${AGENT_SECRET_MOUNT_PATH}"
@@ -846,6 +864,10 @@ cat >> "$YAML_FILE" <<YAML
       - name: project
         hostPath:
           path: ${HOST_PATH}
+          type: Directory
+      - name: geek-env
+        hostPath:
+          path: ${REPO_ROOT}
           type: Directory
 $(if [[ -n "$AGENT_SECRET_CONTENT" ]]; then
 echo "      - name: agent-auth"
