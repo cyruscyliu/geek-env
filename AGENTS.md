@@ -20,6 +20,9 @@ component installers in `scripts/` such as `setup-nvim.sh` and
   before committing.
 - `nvim --headless "+Lazy! sync" +qa`: refresh Neovim plugins after
   editing `config/nvim/`.
+- `./tests/smoke-test.sh`: post-install validation suite.
+- `./tests/test-toolkit.sh`: Docker-based integration test (full install
+  twice, checks idempotency).
 
 Run commands from the repo root. Most setup scripts use `sudo` and
 overwrite user config after creating `*.pre-geek-env*` backups.
@@ -42,8 +45,8 @@ ensure startup succeeds and plugin specs load cleanly. Document any
 checks you could not run because of sandbox, package, or network limits.
 
 ## Commit & Pull Request Guidelines
-Recent commits use short, imperative subjects such as `Fix missing omz`
-and `Refactor Neovim layout around plugins`. Keep commit titles
+Recent commits use short, imperative subjects such as `Fix Neovim layout
+and harden setup scripts` and `Optimize neo-tree behaviors`. Keep commit titles
 concise, capitalized, and focused on one change. When a change affects
 documented behavior, installed components, workflow notes, or user
 expectations, update the `README.md` `Notes` section in the same change

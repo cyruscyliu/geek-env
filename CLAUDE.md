@@ -23,7 +23,7 @@ Run all commands from the repo root. Setup scripts use `sudo` and create `*.pre-
 
 - **install.sh** — top-level orchestrator; dispatches to `scripts/setup-{zsh,nvim,tmux,alacritty,i3,zram}.sh`
 - **scripts/** — each installer is standalone and idempotent; detects package manager (apt/dnf/brew)
-- **config/nvim/** — Lua-based Neovim config: `lua/config/` (options, keymaps, lazy.nvim bootstrap) and `lua/plugins/` (lazy.nvim plugin specs split by concern: editor, lsp, ui, agent)
+- **config/nvim/** — Lua-based Neovim config: `lua/config/` (options, keymaps, lazy.nvim bootstrap) and `lua/plugins/` (lazy.nvim plugin specs split by concern: coding, editor, git, lsp, ui)
 - **config/{i3,alacritty,tmux}/** — app configs symlinked or copied into user home directories
 - **tests/** — smoke-test.sh validates installed state; test-toolkit.sh runs full install in a disposable Debian Docker container
 
