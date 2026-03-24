@@ -74,14 +74,14 @@ kubectl get nodes -o wide
 kubectl describe node <worker-name>
 ```
 
-## `scripts/new-agent.sh`
+## `scripts/agentctl.py`
 
 Generate and manage an agent vault.
 
 ### Create
 
 ```bash
-bash scripts/new-agent.sh
+python3 scripts/agentctl.py
 ```
 
 The wizard collects:
@@ -95,6 +95,11 @@ The wizard collects:
 - agent choice
 - env vars and secrets
 - optional NodePort exposure
+
+Memory and storage entries use Kubernetes binary units such as `Mi`, `Gi`, and
+`Ti`. If you enter a bare number in the wizard or have an older saved
+`agents/<project>.env`, `scripts/agentctl.py` normalizes it to `Gi` before
+writing or reusing the manifest.
 
 ### Agent defaults
 
@@ -130,7 +135,7 @@ agents/
 ### Manage
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 Actions:
@@ -169,7 +174,7 @@ The generated `agent` account is switched to `zsh` after provisioning.
 ### Show status
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 Choose `status`.
@@ -177,7 +182,7 @@ Choose `status`.
 ### Stop a vault
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 Choose `delete`.
@@ -185,7 +190,7 @@ Choose `delete`.
 ### Re-apply a saved manifest
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 Choose `update`.
@@ -194,18 +199,20 @@ This reapplies `agents/<project>.yaml` as saved. It only rolls a new pod if the
 saved manifest changes the Deployment pod template. The manage flow reports
 whether it detected a rollout or is reusing the current pod before attaching,
 and shows the pod it is watching plus provisioning logs once the new container
-starts.
+starts. Before applying, it also checks the requested CPU, memory, and
+ephemeral storage against remaining requested headroom on ready schedulable
+nodes and fails early if nothing in the cluster can fit the pod.
 
 ### Rebuild a container from current generator logic
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 Choose `rebuild`.
 
 This regenerates the container bootstrap section in `agents/<project>.yaml`
-using the current `scripts/new-agent.sh` logic, then reapplies the manifest.
+using the current `scripts/agentctl.py` logic, then reapplies the manifest.
 
 ## `scripts/refresh-k3s-network.sh`
 

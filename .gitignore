@@ -9,5 +9,9 @@ config/nvim/lazy-lock.json
 .idea/
 .vscode/
 
+# Python caches
+__pycache__/
+*.pyc
+
 # K3S kata configs
 agents

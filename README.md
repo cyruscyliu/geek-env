@@ -22,20 +22,13 @@ to permissive mode during generation, with a prompt to disable it when needed.
 ```bash
 grep -c vmx /proc/cpuinfo
 sudo bash scripts/setup-k3s-kata.sh
-bash scripts/new-agent.sh
+python3 scripts/agentctl.py
 ```
-
-Recommended first vault:
-
-- runtime: `kata-qemu`
-- image: `debian:trixie-slim`
-- agent: `OpenAI Codex`
-- deploy: `yes`
 
 To re-enter or manage it later:
 
 ```bash
-bash scripts/new-agent.sh <project>
+python3 scripts/agentctl.py <project>
 ```
 
 For tool-specific usage details, see:
@@ -48,15 +41,21 @@ For tool-specific usage details, see:
 You can also add additional x64 Kata worker nodes with
 [`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
 
+## Notes
+
+- `scripts/agentctl.py` expects Kubernetes-style units for memory and storage
+  limits such as `Gi` or `Mi`. Bare legacy values are normalized to `Gi` when
+  saved manifests are reused.
+
 ## Contribute
 
-- keep Bash scripts idempotent and explicit
-- use `set -euo pipefail`
 - update docs when behavior changes
 - validate with:
 
 ```bash
-bash -n scripts/new-agent.sh scripts/setup-k3s-kata.sh
+python3 -m py_compile scripts/agentctl.py
+bash -n scripts/setup-k3s-kata.sh
+python3 -m unittest tests/test_agentctl_user_story.py
 ./tests/smoke-test.sh
 ```
 
