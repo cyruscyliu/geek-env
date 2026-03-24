@@ -5,13 +5,8 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 OH_MY_ZSH_DIR="${ZSH:-$HOME/.oh-my-zsh}"
-P10K_DIR="$ZSH_CUSTOM_DIR/themes/powerlevel10k"
 AUTOSUGGESTIONS_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
 SYNTAX_HIGHLIGHTING_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
-FONT_VERSION="v3.4.0"
-FONT_ARCHIVE="Meslo.zip"
-FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/${FONT_VERSION}/${FONT_ARCHIVE}"
-SKIP_FONT_INSTALL="${SKIP_FONT_INSTALL:-0}"
 SKIP_DEFAULT_SHELL_CHANGE="${SKIP_DEFAULT_SHELL_CHANGE:-0}"
 
 log() {
@@ -43,7 +38,7 @@ detect_pkg_manager() {
   elif command_exists brew; then
     echo "brew"
   else
-    fail "Unsupported system. Install zsh, git, curl, unzip, and a Nerd Font manually."
+    fail "Unsupported system. Install zsh, git, and curl manually."
   fi
 }
 
@@ -54,67 +49,15 @@ install_packages() {
   case "$manager" in
     apt)
       sudo apt-get update || log "apt-get update had errors (non-fatal), continuing"
-      sudo apt-get install -y zsh git curl unzip fontconfig
+      sudo apt-get install -y zsh git curl
       ;;
     dnf)
-      sudo dnf install -y zsh git curl unzip fontconfig
+      sudo dnf install -y zsh git curl
       ;;
     brew)
-      brew install zsh git curl unzip fontconfig
+      brew install zsh git curl
       ;;
   esac
-}
-
-meslo_nerd_font_installed() {
-  local fonts_dir
-
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    fonts_dir="$HOME/Library/Fonts"
-  else
-    fonts_dir="$HOME/.local/share/fonts"
-  fi
-
-  if [[ -d "$fonts_dir" ]] && find "$fonts_dir" -maxdepth 1 -type f \( -iname '*Meslo*Nerd*' -o -iname '*Meslo*NF*' \) -print -quit | grep -q .; then
-    return 0
-  fi
-
-  if command_exists fc-list && fc-list | grep -qi 'Meslo.*Nerd'; then
-    return 0
-  fi
-
-  return 1
-}
-
-install_font() {
-  local fonts_dir archive_path
-
-  if [[ "$SKIP_FONT_INSTALL" == "1" ]]; then
-    log "Skipping font installation"
-    return
-  fi
-
-  if meslo_nerd_font_installed; then
-    log "Meslo Nerd Font already installed; skipping download"
-    return
-  fi
-
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    fonts_dir="$HOME/Library/Fonts"
-  else
-    fonts_dir="$HOME/.local/share/fonts"
-  fi
-
-  mkdir -p "$fonts_dir"
-  archive_path="$(mktemp "/tmp/${FONT_ARCHIVE}.XXXXXX")"
-
-  log "Installing Meslo Nerd Font into $fonts_dir"
-  curl -fsSL "$FONT_URL" -o "$archive_path"
-  unzip -o "$archive_path" -d "$fonts_dir" >/dev/null
-  rm -f "$archive_path"
-
-  if command_exists fc-cache; then
-    fc-cache -f "$fonts_dir" >/dev/null 2>&1 || true
-  fi
 }
 
 clone_or_update_repo() {
@@ -159,7 +102,7 @@ install_oh_my_zsh() {
 }
 
 ensure_oh_my_zsh_layout() {
-  mkdir -p "$ZSH_CUSTOM_DIR/themes" "$ZSH_CUSTOM_DIR/plugins" "$HOME/.zsh"
+  mkdir -p "$ZSH_CUSTOM_DIR/plugins" "$HOME/.zsh"
 }
 
 write_zshenv() {
@@ -188,14 +131,13 @@ write_zshrc() {
   cat >"$zshrc" <<EOF
 export ZSH="$OH_MY_ZSH_DIR"
 export ZSH_CUSTOM="${ZSH_CUSTOM_DIR}"
-export POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
 export PATH="\$HOME/.local/bin:\$PATH"
 export EDITOR="nvim"
 export VISUAL="nvim"
 
 plugins=(git python sudo zsh-autosuggestions zsh-syntax-highlighting)
 
-ZSH_THEME="powerlevel10k/powerlevel10k"
+ZSH_THEME=""
 [[ -r "\$ZSH/oh-my-zsh.sh" ]] && source "\$ZSH/oh-my-zsh.sh"
 
 if [[ -o interactive ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
@@ -205,39 +147,9 @@ fi
 alias vim='nvim'
 
 if [[ -o interactive ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
-  if [[ -n "\${SSH_CONNECTION:-}" ]]; then
-    PROMPT='%n@%m:%~ %# '
-    RPROMPT=''
-  else
-    [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
-  fi
+  PROMPT='%n@%m:%~ %# '
+  RPROMPT=''
 fi
-EOF
-}
-
-write_p10k_config() {
-  local p10k
-  p10k="$HOME/.p10k.zsh"
-
-  if [[ -f "$p10k" ]]; then
-    log "Keeping existing ~/.p10k.zsh"
-    return
-  fi
-
-  cat >"$p10k" <<'EOF'
-# Minimal Powerlevel10k configuration.
-typeset -g POWERLEVEL9K_MODE=nerdfont-complete
-typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs prompt_char)
-typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status command_execution_time background_jobs time)
-typeset -g POWERLEVEL9K_PROMPT_ADD_NEWLINE=true
-typeset -g POWERLEVEL9K_MULTILINE_FIRST_PROMPT_PREFIX=""
-typeset -g POWERLEVEL9K_MULTILINE_LAST_PROMPT_PREFIX=""
-typeset -g POWERLEVEL9K_SHORTEN_STRATEGY=truncate_to_unique
-typeset -g POWERLEVEL9K_TIME_FORMAT='%D{%H:%M}'
-typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VIINS_CONTENT_EXPANSION='> '
-typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VIINS_CONTENT_EXPANSION='! '
-typeset -g POWERLEVEL9K_PROMPT_CHAR_OK_VICMD_CONTENT_EXPANSION='< '
-typeset -g POWERLEVEL9K_PROMPT_CHAR_ERROR_VICMD_CONTENT_EXPANSION='< '
 EOF
 }
 
@@ -271,21 +183,17 @@ set_default_shell() {
 
 main() {
   install_packages
-  install_font
   install_oh_my_zsh
   ensure_oh_my_zsh_layout
 
-  clone_or_update_repo https://github.com/romkatv/powerlevel10k.git "$P10K_DIR"
   clone_or_update_repo https://github.com/zsh-users/zsh-autosuggestions.git "$AUTOSUGGESTIONS_DIR"
   clone_or_update_repo https://github.com/zsh-users/zsh-syntax-highlighting.git "$SYNTAX_HIGHLIGHTING_DIR"
 
   write_zshrc
   write_zshenv
-  write_p10k_config
   set_default_shell
 
   log "Setup complete."
-  log "Restart your terminal and select a Nerd Font variant such as 'MesloLGS Nerd Font' if your terminal does not switch fonts automatically."
 }
 
 main "$@"

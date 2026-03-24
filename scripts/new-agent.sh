@@ -162,13 +162,65 @@ agent_package_for_cmd() {
     esac
 }
 
+resolve_agent_args() {
+    local agent_cmd="$1"
+    local permissive_mode="$2"
+
+    case "$agent_cmd:$permissive_mode" in
+        "claude:true")
+            printf '%s\n' "--dangerously-skip-permissions"
+            ;;
+        "codex:true")
+            printf '%s\n' "--dangerously-bypass-approvals-and-sandbox"
+            ;;
+        *)
+            printf '%s\n' ""
+            ;;
+    esac
+}
+
 baseline_packages() {
     printf '%s\n' "sudo ca-certificates curl wget git jq tmux python3 python3-pip ripgrep fd-find bat"
 }
 
+agent_bin_dir() {
+    printf '%s\n' "/opt/agent-cli/bin"
+}
+
+build_agent_wrapper_line() {
+    local agent_cmd="$1"
+    local agent_args="$2"
+    local agent_bin
+
+    if [[ -z "$agent_cmd" ]]; then
+        printf '%s' ""
+        return
+    fi
+
+    agent_bin="$(agent_bin_dir)/${agent_cmd}"
+
+    printf "printf '%%s\\\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec %s%s \"\$@\"' > /usr/local/bin/%s && chmod 755 /usr/local/bin/%s && \\\\\n          " \
+        "$agent_bin" \
+        "${agent_args:+ ${agent_args}}" \
+        "$agent_cmd" \
+        "$agent_cmd"
+}
+
+build_agent_install_line() {
+    local agent_pkg="$1"
+
+    if [[ -z "$agent_pkg" ]]; then
+        printf '%s' ""
+        return
+    fi
+
+    printf "mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli %s && \\\\\n          " "$agent_pkg"
+}
+
 build_user_setup_line() {
 cat <<'EOF'
-su - agent -c "REPO_ROOT=/opt/geek-env SKIP_FONT_INSTALL=1 SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \
+su - agent -c "REPO_ROOT=/opt/geek-env SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \
+          usermod -s "$(command -v zsh)" agent && \
           su - agent -c "REPO_ROOT=/opt/geek-env /opt/geek-env/scripts/setup-nvim.sh" && \
           su - agent -c "REPO_ROOT=/opt/geek-env SKIP_PACKAGE_INSTALL=1 /opt/geek-env/scripts/setup-tmux.sh" && \
 EOF
@@ -236,11 +288,11 @@ refresh_project_manifest() {
     fi
 
     if [[ -n "$AGENT_PKG" ]]; then
-        AGENT_INSTALL_LINE="npm install -g ${AGENT_PKG} && \\"$'\n'"          "
+        AGENT_INSTALL_LINE="$(build_agent_install_line "${AGENT_PKG}")"
     fi
 
     if [[ -n "${PROJECT_AGENT_CMD:-}" ]]; then
-        AGENT_WRAPPER_LINE="printf '%s\n' '#!/usr/bin/env sh' 'exec ${PROJECT_AGENT_CMD}${PROJECT_AGENT_ARGS:+ ${PROJECT_AGENT_ARGS}} \"\$@\"' > /usr/local/bin/start-agent && chmod 755 /usr/local/bin/start-agent && \\"$'\n'"          "
+        AGENT_WRAPPER_LINE="$(build_agent_wrapper_line "${PROJECT_AGENT_CMD}" "${PROJECT_AGENT_ARGS}")"
     fi
 
     tmp="$(mktemp)"
@@ -304,12 +356,31 @@ LOG_STREAM_PID=""
 
 start_log_stream() {
     local pod="$1"
+    local interval_seconds=2
+    local timeout_seconds="${LOG_STREAM_START_TIMEOUT_SECONDS:-120}"
+    local elapsed=0
+    local running_started="" waiting_reason=""
 
     stop_log_stream
-    echo ""
-    hint "Streaming logs from ${pod} while waiting..."
-    kubectl -n "$PROJECT_NAME" logs -f "$pod" --tail=20 --ignore-errors=true 2>&1 &
-    LOG_STREAM_PID=$!
+
+    while (( elapsed < timeout_seconds )); do
+        running_started="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}' 2>/dev/null || true)"
+        if [[ -n "$running_started" ]]; then
+            echo ""
+            hint "Streaming logs from ${pod} while waiting..."
+            kubectl -n "$PROJECT_NAME" logs -f "$pod" --tail=20 --ignore-errors=true >/dev/null 2>&1 &
+            LOG_STREAM_PID=$!
+            return 0
+        fi
+
+        waiting_reason="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
+        if [[ -n "$waiting_reason" && "$waiting_reason" != "ContainerCreating" ]]; then
+            break
+        fi
+
+        sleep "$interval_seconds"
+        elapsed=$(( elapsed + interval_seconds ))
+    done
 }
 
 stop_log_stream() {
@@ -468,7 +539,7 @@ attach_to_project_pod() {
     fi
 
     warn "tmux is not ready yet. Opening an agent shell in ${work_dir}."
-    kubectl -n "$PROJECT_NAME" exec -it "$pod" -- su - agent -c "cd '$work_dir' 2>/dev/null || cd ~; exec /bin/sh"
+    kubectl -n "$PROJECT_NAME" exec -it "$pod" -- su - agent -c "cd '$work_dir' 2>/dev/null || cd ~; exec \"\${SHELL:-/bin/sh}\""
 }
 
 apply_project_manifest() {
@@ -489,14 +560,20 @@ if [[ -n "${1:-}" ]]; then
     PROJECT_MOUNT_PATH="/home/agent/work"
     PROJECT_AGENT_CMD=""
     PROJECT_AGENT_ARGS=""
+    PROJECT_PERMISSIVE_MODE=""
     PROJECT_ALL_PACKAGES=""
 
     if [[ -f "$PROJECT_ENV_FILE" ]]; then
         PROJECT_MOUNT_PATH="$(awk -F= '/^MOUNT_PATH=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
         PROJECT_MOUNT_PATH="${PROJECT_MOUNT_PATH:-/home/agent/work}"
         PROJECT_AGENT_CMD="$(awk -F= '/^AGENT_CMD=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
+        PROJECT_PERMISSIVE_MODE="$(awk -F= '/^PERMISSIVE_MODE=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
         PROJECT_AGENT_ARGS="$(awk -F= '/^AGENT_ARGS=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
         PROJECT_ALL_PACKAGES="$(awk -F= '/^ALL_PACKAGES=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
+
+        if [[ -n "$PROJECT_AGENT_CMD" && -n "$PROJECT_PERMISSIVE_MODE" ]]; then
+            PROJECT_AGENT_ARGS="$(resolve_agent_args "$PROJECT_AGENT_CMD" "$PROJECT_PERMISSIVE_MODE")"
+        fi
     fi
 
     if ! kubectl -n "$PROJECT_NAME" get deployment "$PROJECT_NAME" &>/dev/null 2>&1; then
@@ -743,17 +820,7 @@ if [[ -n "$AGENT_CMD" ]]; then
         PERMISSIVE_MODE="false"
     fi
 
-    case "$AGENT_CMD:$PERMISSIVE_MODE" in
-        "claude:true")
-            AGENT_ARGS="--dangerously-skip-permissions"
-            ;;
-        "codex:true")
-            AGENT_ARGS="--dangerously-bypass-approvals-and-sandbox"
-            ;;
-        *)
-            AGENT_ARGS=""
-            ;;
-    esac
+    AGENT_ARGS="$(resolve_agent_args "$AGENT_CMD" "$PERMISSIVE_MODE")"
 fi
 
 if [[ -n "$AGENT_CMD" ]]; then
@@ -928,12 +995,12 @@ fi
 
 AGENT_INSTALL_LINE=""
 if [[ -n "$AGENT_PKG" ]]; then
-    AGENT_INSTALL_LINE="npm install -g ${AGENT_PKG} && \\"$'\n'"          "
+    AGENT_INSTALL_LINE="$(build_agent_install_line "${AGENT_PKG}")"
 fi
 
 AGENT_WRAPPER_LINE=""
 if [[ -n "$AGENT_CMD" ]]; then
-    AGENT_WRAPPER_LINE="printf '%s\n' '#!/usr/bin/env sh' 'exec ${AGENT_CMD}${AGENT_ARGS:+ ${AGENT_ARGS}} \"\$@\"' > /usr/local/bin/start-agent && chmod 755 /usr/local/bin/start-agent && \\"$'\n'"          "
+    AGENT_WRAPPER_LINE="$(build_agent_wrapper_line "${AGENT_CMD}" "${AGENT_ARGS}")"
 fi
 
 USER_SETUP_LINE="$(build_user_setup_line)"
@@ -1115,7 +1182,7 @@ echo -e "  Resources ${BOLD}${CPU} CPU · ${MEMORY} RAM · ${STORAGE} storage${R
 echo -e "  Mount     ${BOLD}${HOST_PATH}${RESET} → ${MOUNT_PATH}"
 [[ -n "$AGENT_CMD" ]] && echo -e "  Agent     ${BOLD}${AGENT_CMD} ${AGENT_ARGS}${RESET}"
 [[ -n "$AGENT_CMD" ]] && echo -e "  Permissive ${BOLD}${PERMISSIVE_MODE:-false}${RESET}"
-[[ -n "$AGENT_CMD" ]] && echo -e "  Wrapper   ${BOLD}start-agent${RESET}"
+[[ -n "$AGENT_CMD" ]] && echo -e "  Command   ${BOLD}${AGENT_CMD}${RESET}"
 echo -e "  ${DIM}───────────────────────────────────────${RESET}"
 echo ""
 confirm_yes "Deploy now?" || exit 0

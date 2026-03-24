@@ -107,7 +107,7 @@ Actions:
 - attaches in tmux as `agent`
 - starts in the configured work directory
 - does not auto-run the coding agent on attach
-- generates a `start-agent` wrapper inside the container that launches the configured agent with saved args
+- installs the selected agent behind a wrapper named `codex` or `claude` so the normal command includes the saved args
 
 ## Container Bootstrap
 
@@ -118,6 +118,7 @@ The generated vault reuses these repo scripts inside the container:
 - `scripts/setup-tmux.sh`
 
 It does not run `scripts/setup-alacritty.sh` inside the container.
+The generated `agent` account is switched to `zsh` after provisioning.
 
 ## Troubleshooting
 

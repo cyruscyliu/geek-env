@@ -14,15 +14,15 @@ opacity = 0.96
 size = 10.0
 
 [font.normal]
-family = "MesloLGS Nerd Font"
+family = "DejaVu Sans Mono"
 style = "Regular"
 
 [font.bold]
-family = "MesloLGS Nerd Font"
+family = "DejaVu Sans Mono"
 style = "Bold"
 
 [font.italic]
-family = "MesloLGS Nerd Font"
+family = "DejaVu Sans Mono"
 style = "Italic"
 
 [font.offset]

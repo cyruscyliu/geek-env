@@ -51,7 +51,6 @@ run_check() {
 check_zsh() {
   assert_file "$HOME/.zshrc"
   assert_file "$HOME/.zshenv"
-  assert_file "$HOME/.p10k.zsh"
   assert_dir "$HOME/.oh-my-zsh"
   zsh -ic 'exit 0'
 

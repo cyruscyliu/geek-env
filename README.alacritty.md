@@ -1,6 +1,6 @@
 # Alacritty
 
-GPU-accelerated terminal emulator configured with Catppuccin Mocha theme, MesloLGS Nerd Font, and tmux integration.
+GPU-accelerated terminal emulator configured with Catppuccin Mocha theme, DejaVu Sans Mono, and tmux integration.
 
 ## Install
 
@@ -58,7 +58,7 @@ The setup script picks a font size based on display height:
 ## Features
 
 - **Catppuccin Mocha** color scheme
-- **MesloLGS Nerd Font** for Powerlevel10k glyph support
+- **DejaVu Sans Mono** as the default terminal font
 - **1px line spacing** (`font.offset.y = 1`) for readability
 - **Auto-copy on select** (`save_to_clipboard = true`)
 - **50k line scrollback** with multiplier 3

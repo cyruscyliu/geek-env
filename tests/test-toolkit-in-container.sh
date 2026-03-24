@@ -58,14 +58,12 @@ main() {
 
   log "Asserting installed toolkit state"
   assert_file "$HOME/.zshrc"
-  assert_dir "$HOME/.oh-my-zsh/custom/themes/powerlevel10k"
   assert_dir "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
   assert_dir "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
   assert_dir "$HOME/.zsh/zsh-autocomplete"
   assert_file "$GEEK_ENV_SYSTEM_ROOT/etc/default/zramswap"
 
   log "Checking idempotency signals"
-  assert_log_contains "$SECOND_LOG" "Meslo Nerd Font already installed; skipping download"
   assert_log_contains "$SECOND_LOG" "Test mode enabled; skipping login shell change"
   assert_log_contains "$SECOND_LOG" "Skipping zramswap service activation"
   assert_log_contains "$SECOND_LOG" "[install] All requested components installed."
