@@ -149,6 +149,7 @@ Actions:
 - waits for `agent` and expected tools
 - attaches in tmux as `agent`
 - starts in the configured work directory
+- persists `/home/agent/.codex` and `/home/agent/.claude` under `<host-path>/.agent-state/`
 - does not auto-run the coding agent on attach
 - installs the selected agent behind a wrapper named `codex` or `claude` so the normal command includes the saved args
 
@@ -190,7 +191,10 @@ bash scripts/new-agent.sh <project>
 Choose `update`.
 
 This reapplies `agents/<project>.yaml` as saved. It only rolls a new pod if the
-saved manifest changes the Deployment pod template.
+saved manifest changes the Deployment pod template. The manage flow reports
+whether it detected a rollout or is reusing the current pod before attaching,
+and shows the pod it is watching plus provisioning logs once the new container
+starts.
 
 ### Rebuild a container from current generator logic
 

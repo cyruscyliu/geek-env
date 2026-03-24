@@ -333,6 +333,14 @@ get_project_pod() {
         --no-headers 2>/dev/null | awk '$2 == "<none>" || $2 == "" { print "pod/" $1 }' | tail -1
 }
 
+get_ready_project_pod() {
+    kubectl -n "$PROJECT_NAME" get pods \
+        --selector="app=${PROJECT_NAME}" \
+        --sort-by=.metadata.creationTimestamp \
+        -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,DELETING:.metadata.deletionTimestamp \
+        --no-headers 2>/dev/null | awk '($3 == "<none>" || $3 == "") && $2 == "true" { print "pod/" $1 }' | tail -1
+}
+
 print_deploy_diagnostics() {
     local pod="$1"
 
@@ -368,7 +376,7 @@ start_log_stream() {
         if [[ -n "$running_started" ]]; then
             echo ""
             hint "Streaming logs from ${pod} while waiting..."
-            kubectl -n "$PROJECT_NAME" logs -f "$pod" --tail=20 --ignore-errors=true >/dev/null 2>&1 &
+            kubectl -n "$PROJECT_NAME" logs -f "$pod" --tail=20 --ignore-errors=true 2>/dev/null &
             LOG_STREAM_PID=$!
             return 0
         fi
@@ -388,6 +396,21 @@ stop_log_stream() {
         kill "$LOG_STREAM_PID" >/dev/null 2>&1 || true
         wait "$LOG_STREAM_PID" 2>/dev/null || true
         LOG_STREAM_PID=""
+    fi
+}
+
+maybe_start_log_stream() {
+    local pod="$1"
+    local running_started=""
+
+    [[ -n "${LOG_STREAM_PID:-}" ]] && return 0
+
+    running_started="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}' 2>/dev/null || true)"
+    if [[ -n "$running_started" ]]; then
+        echo ""
+        hint "Streaming logs from ${pod} while waiting..."
+        kubectl -n "$PROJECT_NAME" logs -f "$pod" --tail=20 --ignore-errors=true 2>/dev/null &
+        LOG_STREAM_PID=$!
     fi
 }
 
@@ -434,17 +457,28 @@ wait_for_deployment_ready() {
     local timeout_seconds="${1:-900}"
     local interval_seconds=5
     local elapsed=0
-    local pod="" phase="" ready="" waiting_reason="" terminated_reason="" last_status=""
+    local pod="" phase="" ready="" waiting_reason="" terminated_reason="" scheduled_reason="" scheduled_message="" last_status=""
+    local last_pod=""
 
     while (( elapsed < timeout_seconds )); do
         pod="$(get_project_pod)"
         if [[ -n "$pod" ]]; then
+            if [[ "$pod" != "$last_pod" ]]; then
+                hint "Watching ${pod}"
+                stop_log_stream
+                last_pod="$pod"
+            fi
+            maybe_start_log_stream "$pod"
+
             phase="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
             ready="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || true)"
             waiting_reason="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
             terminated_reason="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || true)"
+            scheduled_reason="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null || true)"
+            scheduled_message="$(kubectl -n "$PROJECT_NAME" get "$pod" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].message}' 2>/dev/null || true)"
 
             if [[ "$ready" == "true" ]]; then
+                stop_log_stream
                 ok "Pod is ready."
                 return 0
             fi
@@ -458,6 +492,11 @@ wait_for_deployment_ready() {
             elif [[ -z "$last_status" || "$phase" != "$last_status" ]]; then
                 hint "Status: ${phase:-Unknown}"
                 last_status="$phase"
+            fi
+
+            if [[ "$scheduled_reason" == "Unschedulable" ]]; then
+                print_deploy_diagnostics "$pod"
+                fail "Pod is unschedulable: ${scheduled_message:-scheduler could not place the pod}"
             fi
 
             if [[ "$waiting_reason" == "CrashLoopBackOff" || "$waiting_reason" == "ImagePullBackOff" || "$waiting_reason" == "ErrImagePull" ]]; then
@@ -551,6 +590,16 @@ apply_project_manifest() {
     kubectl apply -f "$manifest"
 }
 
+get_deployment_generation() {
+    kubectl -n "$PROJECT_NAME" get deployment "$PROJECT_NAME" \
+        -o jsonpath='{.metadata.generation}' 2>/dev/null || true
+}
+
+get_deployment_observed_generation() {
+    kubectl -n "$PROJECT_NAME" get deployment "$PROJECT_NAME" \
+        -o jsonpath='{.status.observedGeneration}' 2>/dev/null || true
+}
+
 # ────────────────────────────────────────────────
 # Manage mode  (bash new-agent.sh <project>)
 # ────────────────────────────────────────────────
@@ -602,30 +651,50 @@ echo -e "${RESET}"
 
     case "$ACTION" in
         exec*)
-            POD="$(get_pod)"
+            POD="$(get_ready_project_pod)"
+            [[ -z "$POD" ]] && POD="$(get_pod)"
             [[ -z "$POD" ]] && echo "No pod running." && exit 1
             attach_to_project_pod "$POD"
             ;;
         update*)
+            local_generation_before="$(get_deployment_generation)"
+            local_observed_before="$(get_deployment_observed_generation)"
             apply_project_manifest
-            ok "Waiting for updated pod to start..."
-            wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
-            POD="$(get_pod)"
+
+            local_generation_after="$(get_deployment_generation)"
+            local_observed_after="$(get_deployment_observed_generation)"
+
+            if [[ -n "$local_generation_after" && "$local_generation_after" != "$local_generation_before" ]]; then
+                ok "Pod template changed; waiting for rollout to finish..."
+                if [[ "$local_observed_after" != "$local_generation_after" ]]; then
+                    hint "Deployment generation: ${local_generation_before:-unknown} -> ${local_generation_after}"
+                fi
+                wait_for_deployment_ready "${DEPLOYMENT_READY_TIMEOUT_SECONDS:-900}"
+                POD="$(get_pod)"
+            else
+                ok "No pod-template change detected; reusing the current pod."
+                if [[ -n "$local_observed_after" && "$local_observed_before" != "$local_observed_after" ]]; then
+                    hint "Deployment controller observed generation ${local_observed_after}."
+                fi
+                POD="$(get_ready_project_pod)"
+                [[ -z "$POD" ]] && POD="$(get_pod)"
+            fi
+
             attach_to_project_pod "$POD"
             ;;
         rebuild*)
             refresh_project_manifest
             apply_project_manifest
-            ok "Waiting for rebuilt pod to start..."
-            wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
+            ok "Waiting for rebuilt pod to become ready..."
+            wait_for_deployment_ready "${DEPLOYMENT_READY_TIMEOUT_SECONDS:-900}"
             POD="$(get_pod)"
             attach_to_project_pod "$POD"
             ;;
         restart*)
             ok "Restarting deployment/${PROJECT_NAME}..."
             kubectl -n "$PROJECT_NAME" rollout restart deployment/"$PROJECT_NAME"
-            ok "Waiting for restarted pod to start..."
-            wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
+            ok "Waiting for restarted pod to become ready..."
+            wait_for_deployment_ready "${DEPLOYMENT_READY_TIMEOUT_SECONDS:-900}"
             POD="$(get_pod)"
             attach_to_project_pod "$POD"
             ;;
@@ -1004,6 +1073,9 @@ if [[ -n "$AGENT_CMD" ]]; then
 fi
 
 USER_SETUP_LINE="$(build_user_setup_line)"
+AGENT_STATE_HOST_PATH="${HOST_PATH}/.agent-state"
+CLAUDE_STATE_HOST_PATH="${AGENT_STATE_HOST_PATH}/claude"
+CODEX_STATE_HOST_PATH="${AGENT_STATE_HOST_PATH}/codex"
 
 # ────────────────────────────────────────────────
 # Generate YAML
@@ -1096,6 +1168,10 @@ $(build_container_bootstrap_lines)
         volumeMounts:
         - name: project
           mountPath: ${MOUNT_PATH}
+        - name: claude-home
+          mountPath: /home/agent/.claude
+        - name: codex-home
+          mountPath: /home/agent/.codex
         - name: geek-env
           mountPath: /opt/geek-env
           readOnly: true
@@ -1120,6 +1196,14 @@ cat >> "$YAML_FILE" <<YAML
         hostPath:
           path: ${HOST_PATH}
           type: Directory
+      - name: claude-home
+        hostPath:
+          path: ${CLAUDE_STATE_HOST_PATH}
+          type: DirectoryOrCreate
+      - name: codex-home
+        hostPath:
+          path: ${CODEX_STATE_HOST_PATH}
+          type: DirectoryOrCreate
       - name: geek-env
         hostPath:
           path: ${REPO_ROOT}
@@ -1158,6 +1242,9 @@ cat > "$ENV_FILE" <<ENV
 PROJECT=${PROJECT_NAME}
 HOST_PATH=${HOST_PATH}
 MOUNT_PATH=${MOUNT_PATH}
+AGENT_STATE_HOST_PATH=${AGENT_STATE_HOST_PATH}
+CLAUDE_STATE_HOST_PATH=${CLAUDE_STATE_HOST_PATH}
+CODEX_STATE_HOST_PATH=${CODEX_STATE_HOST_PATH}
 RUNTIME_CLASS=${RUNTIME_CLASS}
 BASE_IMAGE=${BASE_IMAGE}
 CPU=${CPU}
