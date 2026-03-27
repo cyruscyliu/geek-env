@@ -106,16 +106,9 @@ normalizes it to `Gi` before saving the canonical config and rendered manifest.
 - supported agents prompt once for permissive mode and default to `yes`
 - Codex auto-installs `bubblewrap`
 - permissive Codex launches with `--dangerously-bypass-approvals-and-sandbox`
-- permissive Claude launches with `--dangerously-skip-permissions`
 - permissive mode can be disabled during generation for stricter containers
 
 ### Auth sources
-
-Claude:
-
-- `~/.claude/.credentials.json`
-- `~/.config/claude/credentials.json`
-- existing Claude credentials are reused automatically during container creation
 
 Codex:
 
@@ -153,9 +146,9 @@ Actions:
 - waits for `agent` and expected tools
 - attaches in tmux as `agent`
 - starts in the configured work directory
-- persists `/home/agent/.codex` and `/home/agent/.claude` under `<host-path>/.agent-state/`
+- mounts the host `~/.codex` into `/home/agent/.codex` so Codex state is shared across projects
 - does not auto-run the coding agent on attach
-- installs the selected agent behind a wrapper named `codex` or `claude` so the normal command includes the saved args
+- installs Codex behind a `codex` wrapper so the normal command includes the saved args
 
 ## Container Bootstrap
 

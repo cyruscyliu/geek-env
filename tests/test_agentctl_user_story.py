@@ -134,6 +134,64 @@ class UserStoryGraphTest(unittest.TestCase):
         self.assertEqual(loaded.container_port, "8080")
         self.assertEqual(loaded.node_port, "30800")
 
+    def test_persisted_codex_state_uses_shared_home_directory(self) -> None:
+        cfg = AgentConfig(
+            project_name="fight-cuttlefish-x64",
+            host_path="/home/debian/Projects/fight-cuttlefish-x64",
+            mount_path="/home/agent/work",
+            runtime_class="kata-qemu",
+            base_image="debian:trixie-slim",
+            cpu="2",
+            memory="4Gi",
+            storage="20Gi",
+            agent="OpenAI Codex",
+            agent_cmd="codex",
+            permissive_mode="true",
+            agent_args="",
+            persist_state=True,
+            all_packages="",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn(f"          path: {Path.home() / '.codex'}", rendered)
+        self.assertNotIn("/home/agent/.claude", rendered)
+
+    def test_legacy_claude_config_is_loaded_as_none(self) -> None:
+        loaded = AgentConfig.from_config_dict(
+            {
+                "project": "fight-cuttlefish-x64",
+                "workspace": {
+                    "host_path": "/home/debian/Projects/fight-cuttlefish-x64",
+                    "mount_path": "/home/agent/work",
+                },
+                "runtime": {
+                    "class": "kata-qemu",
+                    "base_image": "debian:trixie-slim",
+                },
+                "resources": {
+                    "cpu": "2",
+                    "memory": "4Gi",
+                    "ephemeral_storage": "20Gi",
+                },
+                "agent": {
+                    "kind": "claude",
+                    "label": "Claude Code (Anthropic)",
+                    "permissive": True,
+                    "args": ["--dangerously-skip-permissions"],
+                    "persist_state": True,
+                },
+                "tooling": {
+                    "bootstrap_profile": "full",
+                    "apt_packages": [],
+                    "install_rustup": False,
+                },
+            }
+        )
+
+        self.assertEqual(loaded.agent_cmd, "")
+        self.assertEqual(loaded.agent, "None")
+
 
 if __name__ == "__main__":
     unittest.main()

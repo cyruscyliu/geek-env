@@ -354,14 +354,11 @@ def baseline_packages() -> str:
 
 def agent_package_for_cmd(cmd: str) -> str:
     return {
-        "claude": "@anthropic-ai/claude-code",
         "codex": "@openai/codex",
     }.get(cmd, "")
 
 
 def resolve_agent_args(agent_cmd: str, permissive_mode: str) -> str:
-    if agent_cmd == "claude" and permissive_mode == "true":
-        return "--dangerously-skip-permissions"
     if agent_cmd == "codex" and permissive_mode == "true":
         return "--dangerously-bypass-approvals-and-sandbox"
     return ""
@@ -451,12 +448,8 @@ class AgentConfig:
         return f"{self.host_path.rstrip('/')}/.agent-state"
 
     @property
-    def claude_state_host_path(self) -> str:
-        return f"{self.agent_state_host_path}/claude"
-
-    @property
     def codex_state_host_path(self) -> str:
-        return f"{self.agent_state_host_path}/codex"
+        return str(Path.home() / ".codex")
 
     def to_config_dict(self) -> dict:
         return {
@@ -518,9 +511,16 @@ class AgentConfig:
         service = data.get("service", {}) or {}
         plain = env.get("plain", {}) or {}
         secret = env.get("secret", {}) or {}
-        kind = agent.get("kind") or ""
-        label = agent.get("label") or {
-            "claude": "Claude Code (Anthropic)",
+        saved_kind = agent.get("kind") or ""
+        kind = saved_kind if saved_kind in {"", "none", "codex"} else "none"
+        label = (
+            agent.get("label")
+            if saved_kind in {"", "none", "codex"}
+            else {
+                "none": "None",
+                "": "None",
+            }.get(kind, kind)
+        ) or {
             "codex": "OpenAI Codex",
             "none": "None",
             "": "None",
@@ -558,8 +558,8 @@ class AgentConfig:
         if self.bootstrap_profile == "minimal":
             return (
                 "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-                "          mkdir -p /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
-                "          chown agent:agent /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
+                "          mkdir -p /home/agent /home/agent/.codex && \\\n"
+                "          chown agent:agent /home/agent /home/agent/.codex && \\\n"
                 "          touch /tmp/.ready && sleep infinity"
             )
         rustup_line = ""
@@ -570,8 +570,8 @@ class AgentConfig:
         agent_wrapper_line = build_agent_wrapper_line(self.agent_cmd, self.agent_args)
         return (
             "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-            "          mkdir -p /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
-            "          chown agent:agent /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
+            "          mkdir -p /home/agent /home/agent/.codex && \\\n"
+            "          chown agent:agent /home/agent /home/agent/.codex && \\\n"
             "          apt-get update && apt-get install -y \\\n"
             f"            {self.all_packages} && \\\n"
             "          mkdir -p /etc/sudoers.d && \\\n"
@@ -673,8 +673,6 @@ class AgentConfig:
         if self.persist_state:
             deployment_lines.extend(
                 [
-                    "        - name: claude-home",
-                    "          mountPath: /home/agent/.claude",
                     "        - name: codex-home",
                     "          mountPath: /home/agent/.codex",
                 ]
@@ -723,10 +721,6 @@ class AgentConfig:
         if self.persist_state:
             deployment_lines.extend(
                 [
-                    "      - name: claude-home",
-                    "        hostPath:",
-                    f"          path: {self.claude_state_host_path}",
-                    "          type: DirectoryOrCreate",
                     "      - name: codex-home",
                     "        hostPath:",
                     f"          path: {self.codex_state_host_path}",
@@ -1243,29 +1237,6 @@ def find_first_existing(paths: Iterable[Path]) -> Path | None:
 
 
 def gather_agent_auth(agent_cmd: str, project_name: str) -> tuple[str, str, str, str]:
-    if agent_cmd == "claude":
-        path = find_first_existing(
-            [
-                Path.home() / ".claude" / ".credentials.json",
-                Path.home() / ".config" / "claude" / "credentials.json",
-            ]
-        )
-        if not path:
-            hint("No existing Claude credentials file found on this host.")
-            hint("Running claude auth login so the container can reuse host auth.")
-            if command_exists("claude"):
-                subprocess.run(["claude", "auth", "login"], cwd=str(REPO_ROOT), check=False)
-            path = find_first_existing(
-                [
-                    Path.home() / ".claude" / ".credentials.json",
-                    Path.home() / ".config" / "claude" / "credentials.json",
-                ]
-            )
-        if path:
-            ok(f"Read Claude OAuth credentials from {path}")
-            return f"{project_name}-claude-credentials", "credentials.json", "/home/agent/.claude/.credentials.json", path.read_text()
-        warn("Could not find Claude credentials file — auth may not have completed")
-        return "", "", "", ""
     if agent_cmd == "codex":
         auth_path = Path.home() / ".codex" / "auth.json"
         if not auth_path.exists():
@@ -1442,14 +1413,12 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             resource_step += 1
 
     def step_agent() -> None:
-        options = ["Claude Code (Anthropic)", "OpenAI Codex", "None"]
+        options = ["OpenAI Codex", "None"]
         current = "None"
-        if str(state["agent_cmd"]) == "claude":
-            current = "Claude Code (Anthropic)"
-        elif str(state["agent_cmd"]) == "codex":
+        if str(state["agent_cmd"]) == "codex":
             current = "OpenAI Codex"
         picked = choose("AI coding agent to install in the container", options, default_idx=options.index(current) + 1)
-        agent_cmd = "claude" if picked.startswith("Claude Code") else "codex" if picked.startswith("OpenAI Codex") else ""
+        agent_cmd = "codex" if picked.startswith("OpenAI Codex") else ""
         state["agent"] = picked
         state["agent_cmd"] = agent_cmd
         state["agent_args"] = ""

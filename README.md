@@ -5,7 +5,7 @@ them ship without constant approval babysitting.
 
 ![Platform](https://img.shields.io/badge/platform-k3s-blue)
 ![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
-![Agent](https://img.shields.io/badge/agent-Codex%20%7C%20Claude%20Code-0a7ea4)
+![Agent](https://img.shields.io/badge/agent-Codex-0a7ea4)
 ![Shell](https://img.shields.io/badge/shell-tmux%20%7C%20zsh%20%7C%20Neovim-2ea44f)
 ![License](https://img.shields.io/badge/license-MIT-black)
 
