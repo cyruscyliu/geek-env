@@ -1,6 +1,6 @@
 # Tmux
 
-Terminal multiplexer configured with Catppuccin Mocha theme, vi copy mode, and session persistence.
+Terminal multiplexer configured with Catppuccin Mocha theme and vi copy mode.
 
 ## Install
 
@@ -82,8 +82,6 @@ Closing the last pane in a session switches to another session instead of detach
 | **catppuccin/tmux** | Mocha theme with rounded window status |
 | **tmux-sensible** | Sensible defaults (escape-time 0, focus-events on, etc.) |
 | **tmux-yank** | System clipboard integration |
-| **tmux-resurrect** | Save/restore sessions (`prefix + Ctrl+s` save, `prefix + Ctrl+r` restore) |
-| **tmux-continuum** | Auto-saves sessions every 15 minutes, auto-restores on tmux start |
 
 ## Features
 
@@ -92,6 +90,5 @@ Closing the last pane in a session switches to another session instead of detach
 - **Vi copy mode** with visual selection
 - **Mouse support** for scrolling, pane selection, and resizing
 - **100k line scrollback** history
-- **Session persistence** across reboots via resurrect + continuum
 - **Windows start at 1** (not 0) and auto-renumber on close
 - **Status bar at top** with session name, date, and time
