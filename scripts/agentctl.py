@@ -397,7 +397,7 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
 def build_agent_dirs_line(container_user: str, container_home: str) -> str:
     return (
         f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.config/claude-code {container_home}/.paseo && \\\n"
-        f"          chown -R {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.config {container_home}/.paseo && \\\n"
+        f"          chown {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.config {container_home}/.paseo && \\\n"
     )
 
 
@@ -1259,6 +1259,12 @@ def render_project_manifest(cfg: AgentConfig) -> None:
 
 def apply_project_manifest(cfg: AgentConfig) -> None:
     render_project_manifest(cfg)
+    host_path = Path(cfg.host_path)
+    if not host_path.exists():
+        host_path.mkdir(parents=True, exist_ok=True)
+        ok(f"Created {host_path}")
+    elif not host_path.is_dir():
+        fail(f"Host path must be a directory for hostPath volume mounts: {cfg.host_path}")
     check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
     ok(f"Applying {cfg.yaml_path}...")
     kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False, namespace=None)
