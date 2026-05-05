@@ -93,4 +93,6 @@ bindings = [
   { key = "T",      mods = "Control|Shift", chars = "\u0000c" },
   # Tmux session management
   { key = "S",      mods = "Control|Shift", chars = "\u0000s" },
+  { key = "Q",      mods = "Control|Shift", chars = "\u0000d" },
+  { key = "R",      mods = "Control|Shift", chars = "\u0000r" },
 ]

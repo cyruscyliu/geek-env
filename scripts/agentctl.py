@@ -349,18 +349,30 @@ def sort_unique_words(words: Iterable[str]) -> str:
 
 
 def baseline_packages() -> str:
-    return "sudo ca-certificates curl wget git jq tmux python3 python3-pip ripgrep fd-find bat"
+    return "sudo ca-certificates curl wget git jq python3 python3-pip ripgrep fd-find bat"
+
+
+def agent_label_for_cmd(cmd: str) -> str:
+    return {
+        "codex": "OpenAI Codex",
+        "claude": "Claude Code",
+        "": "None",
+        "none": "None",
+    }.get(cmd, cmd)
 
 
 def agent_package_for_cmd(cmd: str) -> str:
     return {
         "codex": "@openai/codex",
+        "claude": "@anthropic-ai/claude-code",
     }.get(cmd, "")
 
 
 def resolve_agent_args(agent_cmd: str, permissive_mode: str) -> str:
     if agent_cmd == "codex" and permissive_mode == "true":
         return "--dangerously-bypass-approvals-and-sandbox"
+    if agent_cmd == "claude" and permissive_mode == "true":
+        return "--dangerously-skip-permissions"
     return ""
 
 
@@ -368,6 +380,22 @@ def build_agent_install_line(agent_pkg: str) -> str:
     if not agent_pkg:
         return ""
     return f"          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli {agent_pkg} && \\\n"
+
+
+def build_paseo_install_line(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return "          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli @getpaseo/cli && \\\n"
+
+
+def build_paseo_wrapper_line(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return (
+        "          printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' "
+        "'exec /opt/agent-cli/bin/paseo \"$@\"' > /usr/local/bin/paseo "
+        "&& chmod 755 /usr/local/bin/paseo && \\\n"
+    )
 
 
 def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
@@ -381,12 +409,27 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
     )
 
 
-def build_user_setup_line() -> str:
+def build_agent_dirs_line() -> str:
     return (
-        'su - agent -c "REPO_ROOT=/opt/geek-env SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \\\n'
-        '          usermod -s "$(command -v zsh)" agent && \\\n'
-        '          su - agent -c "REPO_ROOT=/opt/geek-env /opt/geek-env/scripts/setup-nvim.sh" && \\\n'
-        '          su - agent -c "REPO_ROOT=/opt/geek-env SKIP_PACKAGE_INSTALL=1 /opt/geek-env/scripts/setup-tmux.sh" && \\\n'
+        "          mkdir -p /home/agent /home/agent/.codex /home/agent/.config/claude-code /home/agent/.paseo && \\\n"
+        "          chown -R agent:agent /home/agent /home/agent/.codex /home/agent/.config /home/agent/.paseo && \\\n"
+    )
+
+
+def build_sudoers_line() -> str:
+    return (
+        "          mkdir -p /etc/sudoers.d && \\\n"
+        '          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\\n'
+        "          chmod 440 /etc/sudoers.d/agent && \\\n"
+    )
+
+
+def build_paseo_bootstrap_line(agent_cmd: str) -> str:
+    if not agent_cmd:
+        return ""
+    return (
+        '          su - agent -c "PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
+        '          su - agent -c "for i in $(seq 1 30); do PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon pair --json > /home/agent/.paseo/pairing.json.tmp 2>/dev/null && mv /home/agent/.paseo/pairing.json.tmp /home/agent/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
 
 
@@ -451,6 +494,10 @@ class AgentConfig:
     def codex_state_host_path(self) -> str:
         return str(Path.home() / ".codex")
 
+    @property
+    def paseo_state_host_path(self) -> str:
+        return f"{self.host_path.rstrip('/')}/.agent-state/paseo"
+
     def to_config_dict(self) -> dict:
         return {
             "project": self.project_name,
@@ -512,19 +559,15 @@ class AgentConfig:
         plain = env.get("plain", {}) or {}
         secret = env.get("secret", {}) or {}
         saved_kind = agent.get("kind") or ""
-        kind = saved_kind if saved_kind in {"", "none", "codex"} else "none"
+        kind = saved_kind if saved_kind in {"", "none", "codex", "claude"} else "none"
         label = (
             agent.get("label")
-            if saved_kind in {"", "none", "codex"}
+            if saved_kind in {"", "none", "codex", "claude"}
             else {
                 "none": "None",
                 "": "None",
             }.get(kind, kind)
-        ) or {
-            "codex": "OpenAI Codex",
-            "none": "None",
-            "": "None",
-        }.get(kind, kind)
+        ) or agent_label_for_cmd(kind)
         args = agent.get("args", []) or []
         return cls(
             project_name=data["project"],
@@ -558,8 +601,7 @@ class AgentConfig:
         if self.bootstrap_profile == "minimal":
             return (
                 "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-                "          mkdir -p /home/agent /home/agent/.codex && \\\n"
-                "          chown agent:agent /home/agent /home/agent/.codex && \\\n"
+                f"{build_agent_dirs_line()}{build_sudoers_line()}"
                 "          touch /tmp/.ready && sleep infinity"
             )
         rustup_line = ""
@@ -567,17 +609,16 @@ class AgentConfig:
             rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su agent -c 'sh -s -- -y' && \\\n"
         agent_pkg = agent_package_for_cmd(self.agent_cmd)
         agent_install_line = build_agent_install_line(agent_pkg)
+        paseo_install_line = build_paseo_install_line(bool(self.agent_cmd))
+        paseo_wrapper_line = build_paseo_wrapper_line(bool(self.agent_cmd))
         agent_wrapper_line = build_agent_wrapper_line(self.agent_cmd, self.agent_args)
+        paseo_bootstrap_line = build_paseo_bootstrap_line(self.agent_cmd)
         return (
             "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-            "          mkdir -p /home/agent /home/agent/.codex && \\\n"
-            "          chown agent:agent /home/agent /home/agent/.codex && \\\n"
+            f"{build_agent_dirs_line()}"
             "          apt-get update && apt-get install -y \\\n"
             f"            {self.all_packages} && \\\n"
-            "          mkdir -p /etc/sudoers.d && \\\n"
-            '          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\\n'
-            "          chmod 440 /etc/sudoers.d/agent && \\\n"
-            f"          {build_user_setup_line()}{rustup_line}{agent_install_line}{agent_wrapper_line}"
+            f"{build_sudoers_line()}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -677,6 +718,13 @@ class AgentConfig:
                     "          mountPath: /home/agent/.codex",
                 ]
             )
+        if self.agent_cmd:
+            deployment_lines.extend(
+                [
+                    "        - name: paseo-home",
+                    "          mountPath: /home/agent/.paseo",
+                ]
+            )
         if self.agent_secret_content:
             deployment_lines.extend(
                 [
@@ -705,6 +753,13 @@ class AgentConfig:
                         f"              key: {item.name}",
                     ]
                 )
+        if self.agent_cmd:
+            deployment_lines.extend(
+                [
+                    "        - name: PASEO_HOME",
+                    '          value: "/home/agent/.paseo"',
+                ]
+            )
         deployment_lines.extend(
             [
                 "      volumes:",
@@ -724,6 +779,15 @@ class AgentConfig:
                     "      - name: codex-home",
                     "        hostPath:",
                     f"          path: {self.codex_state_host_path}",
+                    "          type: DirectoryOrCreate",
+                ]
+            )
+        if self.agent_cmd:
+            deployment_lines.extend(
+                [
+                    "      - name: paseo-home",
+                    "        hostPath:",
+                    f"          path: {self.paseo_state_host_path}",
                     "          type: DirectoryOrCreate",
                 ]
             )
@@ -1010,9 +1074,9 @@ def wait_for_agent_user(project_name: str, pod: str, timeout_seconds: int = 180)
 
 
 def wait_for_project_tools(project_name: str, pod: str, agent_cmd: str, timeout_seconds: int = 600) -> None:
-    checks = "command -v tmux >/dev/null 2>&1"
+    checks = "true"
     if agent_cmd:
-        checks += f" && command -v {shlex.quote(agent_cmd)} >/dev/null 2>&1"
+        checks = f"command -v {shlex.quote(agent_cmd)} >/dev/null 2>&1 && command -v paseo >/dev/null 2>&1"
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         result = kubectl(["exec", pod, "--", "sh", "-lc", checks], namespace=project_name, check=False)
@@ -1021,27 +1085,59 @@ def wait_for_project_tools(project_name: str, pod: str, agent_cmd: str, timeout_
         time.sleep(2)
     print_deploy_diagnostics(project_name, pod)
     if agent_cmd:
-        fail(f"tmux and {agent_cmd} did not become available in {pod} after {timeout_seconds}s")
-    fail(f"tmux did not become available in {pod} after {timeout_seconds}s")
+        fail(f"paseo and {agent_cmd} did not become available in {pod} after {timeout_seconds}s")
+    fail(f"Project tools did not become available in {pod} after {timeout_seconds}s")
 
 
-def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd: str, tmux_cmd: str = "tmux new-session -A -s main") -> None:
+def read_paseo_pairing_info(project_name: str, pod: str, timeout_seconds: int = 120) -> dict:
+    deadline = time.time() + timeout_seconds
+    cmd = (
+        "if [ -s /home/agent/.paseo/pairing.json ]; then "
+        "cat /home/agent/.paseo/pairing.json; "
+        "else "
+        "PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon pair --json; "
+        "fi"
+    )
+    while time.time() < deadline:
+        result = kubectl(
+            ["exec", pod, "--", "su", "-", "agent", "-c", cmd],
+            namespace=project_name,
+            check=False,
+        )
+        output = (result.stdout or "").strip()
+        if result.returncode == 0 and output:
+            try:
+                return json.loads(output)
+            except json.JSONDecodeError:
+                pass
+        time.sleep(2)
+    return {}
+
+
+def print_paseo_pairing_info(project_name: str, pod: str) -> None:
+    info = read_paseo_pairing_info(project_name, pod)
+    if not info:
+        warn("Paseo pairing information is not available yet.")
+        return
+    print()
+    ok("Paseo pairing info:")
+    url = info.get("url")
+    qr = info.get("qr")
+    if url:
+        print(f"  URL  {url}")
+    if qr:
+        print("  QR")
+        print(indent_block(str(qr), 4))
+
+
+def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd: str) -> None:
     ok(f"Attaching to {pod}...")
     maybe_start_log_stream(project_name, pod)
     wait_for_agent_user(project_name, pod)
     if agent_cmd:
         wait_for_project_tools(project_name, pod, agent_cmd)
+        print_paseo_pairing_info(project_name, pod)
     stop_log_stream()
-    check = kubectl(["exec", pod, "--", "sh", "-lc", "command -v tmux >/dev/null 2>&1"], namespace=project_name, check=False)
-    shell_cmd = f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; {tmux_cmd}"
-    if check.returncode == 0:
-        subprocess.run(
-            ["kubectl", "-n", project_name, "exec", "-it", pod, "--", "su", "-", "agent", "-c", shell_cmd],
-            cwd=str(REPO_ROOT),
-            check=False,
-        )
-        return
-    warn(f"tmux is not ready yet. Opening an agent shell in {work_dir}.")
     subprocess.run(
         ["kubectl", "-n", project_name, "exec", "-it", pod, "--", "su", "-", "agent", "-c", f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\""],
         cwd=str(REPO_ROOT),
@@ -1168,9 +1264,9 @@ def manage_project(project_name: str) -> None:
     print(f"{RESET}")
 
     action = choose(
-        "Action",
-        [
-            "exec    — attach tmux session",
+            "Action",
+            [
+            "exec    — attach agent shell",
             "update  — render saved config and apply it",
             "rebuild — regenerate manifest and roll a new pod",
             "restart — rolling restart with current manifest",
@@ -1250,6 +1346,20 @@ def gather_agent_auth(agent_cmd: str, project_name: str) -> tuple[str, str, str,
                 ok(f"Read Codex OAuth credentials from {auth_path}")
                 return f"{project_name}-codex-auth", "auth.json", "/home/agent/.codex/auth.json", auth_path.read_text()
         warn("Could not auto-read Codex OAuth credentials from host")
+    if agent_cmd == "claude":
+        auth_path = find_first_existing(
+            [
+                Path.home() / ".config" / "claude-code" / "auth.json",
+                Path.home() / ".claude.json",
+            ]
+        )
+        if auth_path is None:
+            hint("No existing Claude Code auth file found on this host.")
+            hint("Run claude and complete login so the container can reuse host auth.")
+        else:
+            ok(f"Read Claude Code credentials from {auth_path}")
+            return f"{project_name}-claude-auth", "auth.json", "/home/agent/.config/claude-code/auth.json", auth_path.read_text()
+        warn("Could not auto-read Claude Code credentials from host")
     return "", "", "", ""
 
 
@@ -1413,12 +1523,19 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             resource_step += 1
 
     def step_agent() -> None:
-        options = ["OpenAI Codex", "None"]
+        options = ["OpenAI Codex", "Claude Code", "None"]
         current = "None"
         if str(state["agent_cmd"]) == "codex":
             current = "OpenAI Codex"
+        elif str(state["agent_cmd"]) == "claude":
+            current = "Claude Code"
         picked = choose("AI coding agent to install in the container", options, default_idx=options.index(current) + 1)
-        agent_cmd = "codex" if picked.startswith("OpenAI Codex") else ""
+        if picked.startswith("OpenAI Codex"):
+            agent_cmd = "codex"
+        elif picked.startswith("Claude Code"):
+            agent_cmd = "claude"
+        else:
+            agent_cmd = ""
         state["agent"] = picked
         state["agent_cmd"] = agent_cmd
         state["agent_args"] = ""
@@ -1426,7 +1543,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         state["agent_secret_key"] = ""
         state["agent_secret_mount_path"] = ""
         state["agent_secret_content"] = ""
-        secret_env_vars = [item for item in list(state["secret_env_vars"]) if item.name != "OPENAI_API_KEY"]
+        secret_env_vars = [item for item in list(state["secret_env_vars"]) if item.name not in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
         if agent_cmd:
             permissive_default = str(state["permissive_mode"]) == "true"
             state["permissive_mode"] = "true" if (confirm_yes("Enable permissive mode for the agent container?") if permissive_default else confirm("Enable permissive mode for the agent container?")) else "false"
@@ -1448,6 +1565,11 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
                         manual = prompt("OPENAI_API_KEY (paste manually, or leave blank to skip)")
                         if manual:
                             secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", manual))
+            if agent_cmd == "claude" and not str(state["agent_secret_content"]):
+                warn("Could not auto-read Claude Code auth file from host")
+                manual = prompt("ANTHROPIC_API_KEY (paste manually, or leave blank to skip)")
+                if manual:
+                    secret_env_vars.append(SecretEnvVar("ANTHROPIC_API_KEY", manual))
         else:
             state["permissive_mode"] = ""
         state["secret_env_vars"] = secret_env_vars
@@ -1492,7 +1614,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
                 secret_env_vars.pop([item.name for item in secret_env_vars].index(picked))
             elif action == "clear all env vars":
                 plain_env_vars = []
-                secret_env_vars = [item for item in secret_env_vars if item.name == "OPENAI_API_KEY"]
+                secret_env_vars = [item for item in secret_env_vars if item.name in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
             state["plain_env_vars"] = plain_env_vars
             state["secret_env_vars"] = secret_env_vars
 
@@ -1592,6 +1714,7 @@ def print_summary(cfg: AgentConfig) -> None:
     if cfg.agent_cmd:
         print(f"  Agent     {BOLD}{cfg.agent_cmd} {cfg.agent_args}{RESET}")
         print(f"  Permissive {BOLD}{cfg.permissive_mode or 'false'}{RESET}")
+        print(f"  Daemon    {BOLD}paseo{RESET}")
         print(f"  Command   {BOLD}{cfg.agent_cmd}{RESET}")
     print(f"  {DIM}───────────────────────────────────────{RESET}")
     print()

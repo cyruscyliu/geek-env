@@ -3,13 +3,16 @@
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from scripts.agentctl import (
     AgentConfig,
-    FileSnapshot,
     InvalidTransitionError,
     PlainEnvVar,
     SecretEnvVar,
+    agent_label_for_cmd,
+    build_paseo_bootstrap_line,
+    resolve_agent_args,
     restore_files,
     snapshot_files,
     transition_public_state,
@@ -17,16 +20,59 @@ from scripts.agentctl import (
 
 
 class UserStoryGraphTest(unittest.TestCase):
+    PROJECT = "fight-cuttlefish-x64"
+    WORKSPACE = f"/home/debian/Projects/{PROJECT}"
+    MOUNT_PATH = "/home/agent/work"
+
+    def make_config(self, **overrides: Any) -> AgentConfig:
+        defaults: dict[str, Any] = {
+            "project_name": self.PROJECT,
+            "host_path": self.WORKSPACE,
+            "mount_path": self.MOUNT_PATH,
+            "runtime_class": "kata-qemu",
+            "base_image": "debian:trixie-slim",
+            "cpu": "2",
+            "memory": "4Gi",
+            "storage": "20Gi",
+            "agent": "None",
+            "agent_cmd": "",
+            "permissive_mode": "",
+            "agent_args": "",
+            "persist_state": False,
+            "all_packages": "",
+            "bootstrap_profile": "full",
+            "install_rustup": False,
+            "plain_env_vars": [],
+            "secret_env_vars": [],
+            "expose_service": False,
+            "container_port": "",
+            "node_port": "",
+            "agent_secret_name": "",
+            "agent_secret_key": "",
+            "agent_secret_mount_path": "",
+            "agent_secret_content": "",
+        }
+        defaults.update(overrides)
+        return AgentConfig(**defaults)
+
+    def make_codex_config(self, **overrides: Any) -> AgentConfig:
+        return self.make_config(
+            agent=agent_label_for_cmd("codex"),
+            agent_cmd="codex",
+            permissive_mode="true",
+            agent_args=resolve_agent_args("codex", "true"),
+            **overrides,
+        )
+
     def test_config_edges(self) -> None:
-        self.assertEqual(transition_public_state("none", "config"), "saved")
-        self.assertEqual(transition_public_state("saved", "config"), "saved")
-        self.assertEqual(transition_public_state("ready", "config"), "saved")
-        self.assertEqual(transition_public_state("failed", "config"), "saved")
+        for state in ("none", "saved", "ready", "failed"):
+            with self.subTest(state=state):
+                self.assertEqual(transition_public_state(state, "config"), "saved")
 
     def test_apply_edges(self) -> None:
-        self.assertEqual(transition_public_state("saved", "apply"), "starting")
-        self.assertEqual(transition_public_state("ready", "apply"), "starting")
-        self.assertEqual(transition_public_state("failed", "apply"), "starting")
+        for state in ("saved", "ready", "failed"):
+            with self.subTest(state=state):
+                self.assertEqual(transition_public_state(state, "apply"), "starting")
 
     def test_system_edges(self) -> None:
         self.assertEqual(transition_public_state("starting", event="pod_ready"), "ready")
@@ -36,17 +82,14 @@ class UserStoryGraphTest(unittest.TestCase):
         self.assertEqual(transition_public_state("ready", "exec"), "ready")
 
     def test_status_edges(self) -> None:
-        self.assertEqual(transition_public_state("none", "status"), "none")
-        self.assertEqual(transition_public_state("saved", "status"), "saved")
-        self.assertEqual(transition_public_state("starting", "status"), "starting")
-        self.assertEqual(transition_public_state("ready", "status"), "ready")
-        self.assertEqual(transition_public_state("failed", "status"), "failed")
+        for state in ("none", "saved", "starting", "ready", "failed"):
+            with self.subTest(state=state):
+                self.assertEqual(transition_public_state(state, "status"), state)
 
     def test_delete_edges(self) -> None:
-        self.assertEqual(transition_public_state("saved", "delete"), "none")
-        self.assertEqual(transition_public_state("starting", "delete"), "none")
-        self.assertEqual(transition_public_state("ready", "delete"), "none")
-        self.assertEqual(transition_public_state("failed", "delete"), "none")
+        for state in ("saved", "starting", "ready", "failed"):
+            with self.subTest(state=state):
+                self.assertEqual(transition_public_state(state, "delete"), "none")
 
     def test_rejects_invalid_user_edges(self) -> None:
         with self.assertRaises(InvalidTransitionError):
@@ -85,23 +128,12 @@ class UserStoryGraphTest(unittest.TestCase):
             self.assertFalse(new_file.exists())
 
     def test_agent_config_round_trip(self) -> None:
-        cfg = AgentConfig(
-            project_name="fight-cuttlefish-x64",
-            host_path="/home/debian/Projects/fight-cuttlefish-x64",
-            mount_path="/home/agent/work",
-            runtime_class="kata-qemu",
-            base_image="debian:trixie-slim",
+        cfg = self.make_codex_config(
             cpu="12",
             memory="12Gi",
             storage="80Gi",
-            agent="OpenAI Codex",
-            agent_cmd="codex",
-            permissive_mode="true",
-            agent_args="--dangerously-bypass-approvals-and-sandbox",
             persist_state=True,
-            all_packages="bat bubblewrap curl git nodejs npm python3 ripgrep sudo tmux wget",
-            bootstrap_profile="full",
-            install_rustup=False,
+            all_packages="bat bubblewrap curl git nodejs npm python3 ripgrep sudo wget",
             plain_env_vars=[PlainEnvVar("FOO", "bar")],
             secret_env_vars=[SecretEnvVar("OPENAI_API_KEY", "secret")],
             expose_service=True,
@@ -115,55 +147,45 @@ class UserStoryGraphTest(unittest.TestCase):
 
         loaded = AgentConfig.from_config_dict(cfg.to_config_dict())
 
-        self.assertEqual(loaded.project_name, cfg.project_name)
-        self.assertEqual(loaded.host_path, cfg.host_path)
-        self.assertEqual(loaded.mount_path, cfg.mount_path)
-        self.assertEqual(loaded.runtime_class, cfg.runtime_class)
-        self.assertEqual(loaded.base_image, cfg.base_image)
-        self.assertEqual(loaded.cpu, cfg.cpu)
-        self.assertEqual(loaded.memory, cfg.memory)
-        self.assertEqual(loaded.storage, cfg.storage)
-        self.assertEqual(loaded.agent_cmd, cfg.agent_cmd)
-        self.assertEqual(loaded.agent_args, cfg.agent_args)
-        self.assertEqual(loaded.persist_state, cfg.persist_state)
-        self.assertEqual(loaded.bootstrap_profile, cfg.bootstrap_profile)
-        self.assertEqual(loaded.all_packages, cfg.all_packages)
+        for field_name in (
+            "project_name",
+            "host_path",
+            "mount_path",
+            "runtime_class",
+            "base_image",
+            "cpu",
+            "memory",
+            "storage",
+            "agent_cmd",
+            "agent_args",
+            "persist_state",
+            "bootstrap_profile",
+            "all_packages",
+            "container_port",
+            "node_port",
+        ):
+            with self.subTest(field=field_name):
+                self.assertEqual(getattr(loaded, field_name), getattr(cfg, field_name))
         self.assertEqual(loaded.plain_env_vars[0].name, "FOO")
         self.assertEqual(loaded.secret_env_vars[0].name, "OPENAI_API_KEY")
         self.assertTrue(loaded.expose_service)
-        self.assertEqual(loaded.container_port, "8080")
-        self.assertEqual(loaded.node_port, "30800")
 
     def test_persisted_codex_state_uses_shared_home_directory(self) -> None:
-        cfg = AgentConfig(
-            project_name="fight-cuttlefish-x64",
-            host_path="/home/debian/Projects/fight-cuttlefish-x64",
-            mount_path="/home/agent/work",
-            runtime_class="kata-qemu",
-            base_image="debian:trixie-slim",
-            cpu="2",
-            memory="4Gi",
-            storage="20Gi",
-            agent="OpenAI Codex",
-            agent_cmd="codex",
-            permissive_mode="true",
-            agent_args="",
-            persist_state=True,
-            all_packages="",
-        )
+        cfg = self.make_codex_config(persist_state=True)
 
         rendered = cfg.yaml_text()
 
         self.assertIn(f"          path: {Path.home() / '.codex'}", rendered)
-        self.assertNotIn("/home/agent/.claude", rendered)
+        self.assertIn("mountPath: /home/agent/.paseo", rendered)
+        self.assertIn(f"          path: {cfg.paseo_state_host_path}", rendered)
 
-    def test_legacy_claude_config_is_loaded_as_none(self) -> None:
+    def test_claude_config_is_loaded(self) -> None:
         loaded = AgentConfig.from_config_dict(
             {
-                "project": "fight-cuttlefish-x64",
+                "project": self.PROJECT,
                 "workspace": {
-                    "host_path": "/home/debian/Projects/fight-cuttlefish-x64",
-                    "mount_path": "/home/agent/work",
+                    "host_path": self.WORKSPACE,
+                    "mount_path": self.MOUNT_PATH,
                 },
                 "runtime": {
                     "class": "kata-qemu",
@@ -189,8 +211,39 @@ class UserStoryGraphTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(loaded.agent_cmd, "")
-        self.assertEqual(loaded.agent, "None")
+        self.assertEqual(loaded.agent_cmd, "claude")
+        self.assertEqual(loaded.agent, "Claude Code (Anthropic)")
+
+    def test_claude_permissive_args_are_resolved(self) -> None:
+        self.assertEqual(resolve_agent_args("claude", "true"), "--dangerously-skip-permissions")
+
+    def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
+        cfg = self.make_config(
+            host_path="/tmp/fight-cuttlefish-x64",
+            bootstrap_profile="minimal",
+        )
+
+        rendered = cfg.build_container_bootstrap_lines()
+        self.assertIn("NOPASSWD: ALL", rendered)
+
+    def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
+        rendered = build_paseo_bootstrap_line("codex")
+        self.assertIn("paseo daemon start", rendered)
+        self.assertIn("paseo daemon pair --json", rendered)
+
+    def test_full_bootstrap_does_not_include_shell_editor_mux_setup(self) -> None:
+        cfg = self.make_codex_config(
+            host_path="/tmp/fight-cuttlefish-x64",
+            cpu="1",
+            memory="2Gi",
+            storage="10Gi",
+            all_packages="python3",
+        )
+
+        rendered = cfg.build_container_bootstrap_lines()
+        for legacy_marker in ("setup-zsh.sh", "setup-nvim.sh", "setup-tmux.sh", "usermod -s"):
+            with self.subTest(marker=legacy_marker):
+                self.assertNotIn(legacy_marker, rendered)
 
 
 if __name__ == "__main__":

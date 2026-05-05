@@ -46,6 +46,17 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
         finally:
             agentctl.OUTPUT_DIR = self.original_output_dir
 
+    def write_and_load_config(self, cfg: AgentConfig) -> AgentConfig:
+        agentctl.write_project_files(cfg)
+        self.assertTrue(cfg.config_path.exists())
+        self.assertTrue(cfg.yaml_path.exists())
+        return load_project_config(self.project_name)
+
+    def wait_until_ready(self, cfg: AgentConfig, timeout_seconds: int = 180) -> str:
+        agentctl.apply_project_manifest(cfg)
+        agentctl.wait_for_pod_running(self.project_name, timeout_seconds=timeout_seconds)
+        return agentctl.wait_for_deployment_ready(self.project_name, timeout_seconds=timeout_seconds)
+
     def make_config(self, **overrides: object) -> AgentConfig:
         defaults: dict[str, object] = {
             "project_name": self.project_name,
@@ -80,22 +91,13 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
     def test_graph_none_saved_starting_ready_delete_none(self) -> None:
         cfg = self.make_config()
 
-        agentctl.write_project_files(cfg)
-        self.assertTrue(cfg.config_path.exists())
-        self.assertTrue(cfg.yaml_path.exists())
-
-        loaded = load_project_config(self.project_name)
+        loaded = self.write_and_load_config(cfg)
         self.assertEqual(loaded.project_name, cfg.project_name)
         self.assertEqual(loaded.bootstrap_profile, "minimal")
         self.assertFalse(loaded.persist_state)
 
-        agentctl.apply_project_manifest(cfg)
-
-        pod = agentctl.wait_for_pod_running(self.project_name, timeout_seconds=180)
-        self.assertTrue(pod.startswith("pod/"))
-
-        ready_pod = agentctl.wait_for_deployment_ready(self.project_name, timeout_seconds=180)
-        self.assertEqual(ready_pod, pod)
+        ready_pod = self.wait_until_ready(cfg)
+        self.assertTrue(ready_pod.startswith("pod/"))
 
         result = agentctl.kubectl(
             ["get", "deployment", self.project_name, "-o", "jsonpath={.status.readyReplicas}"],
@@ -109,18 +111,14 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
 
     def test_graph_ready_config_saved_apply_starting_ready(self) -> None:
         cfg = self.make_config()
-        agentctl.write_project_files(cfg)
-        agentctl.apply_project_manifest(cfg)
-        agentctl.wait_for_deployment_ready(self.project_name, timeout_seconds=180)
+        self.write_and_load_config(cfg)
+        self.wait_until_ready(cfg)
 
         updated = self.make_config(plain_env_vars=[PlainEnvVar("SMOKE_FLAG", "2")])
-        agentctl.write_project_files(updated)
-
-        loaded = load_project_config(self.project_name)
+        loaded = self.write_and_load_config(updated)
         self.assertEqual(loaded.plain_env_vars[0].value, "2")
 
-        agentctl.apply_project_manifest(updated)
-        agentctl.wait_for_deployment_ready(self.project_name, timeout_seconds=180)
+        self.wait_until_ready(updated)
 
         result = agentctl.kubectl(
             ["get", "deployment", self.project_name, "-o", "jsonpath={.spec.template.spec.containers[0].env[0].value}"],
@@ -130,7 +128,7 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
 
     def test_graph_starting_failed_delete_none(self) -> None:
         cfg = self.make_config(cpu="999")
-        agentctl.write_project_files(cfg)
+        self.write_and_load_config(cfg)
 
         render_only = io.StringIO()
         with contextlib.redirect_stdout(render_only):

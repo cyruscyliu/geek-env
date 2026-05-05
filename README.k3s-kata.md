@@ -1,10 +1,11 @@
 # Agent Vault Usage
 
-This document is the command-level reference for the Agent Vault scripts.
+This document is the command-level reference for the Agent Vault fleet
+orchestration scripts.
 
 ## `scripts/setup-k3s-kata.sh`
 
-Prepare a Debian host for Kata-backed agent vaults.
+Prepare a Debian host for Kata-backed agent vaults and multi-node scheduling.
 
 ### Usage
 
@@ -22,7 +23,7 @@ sudo bash scripts/setup-k3s-kata.sh
   - `kata-qemu`
   - `kata-clh`
   - `kata-qemu-tdx`
-- runs a smoke test pod
+- runs [`scripts/run-kata-smoke-test.sh`](scripts/run-kata-smoke-test.sh)
 
 ### Verify
 
@@ -34,7 +35,7 @@ k3s kubectl get runtimeclass
 ## `scripts/setup-k3s-kata-worker.sh`
 
 Join an additional x64 Debian host to an existing k3s cluster as a Kata-capable
-worker.
+worker node.
 
 ### Usage
 
@@ -76,7 +77,7 @@ kubectl describe node <worker-name>
 
 ## `scripts/agentctl.py`
 
-Generate and manage an agent vault.
+Generate and manage an AI-native vault.
 
 ### Create
 
@@ -103,10 +104,14 @@ normalizes it to `Gi` before saving the canonical config and rendered manifest.
 ### Agent defaults
 
 - `OpenAI Codex` is the default agent
+- `Claude Code` is also supported
 - supported agents prompt once for permissive mode and default to `yes`
 - Codex auto-installs `bubblewrap`
 - permissive Codex launches with `--dangerously-bypass-approvals-and-sandbox`
+- permissive Claude Code launches with `--dangerously-skip-permissions`
 - permissive mode can be disabled during generation for stricter containers
+- supported agents auto-install `paseo`, start the daemon during bootstrap,
+  and persist pairing state under the mounted workspace
 
 ### Auth sources
 
@@ -115,6 +120,12 @@ Codex:
 - `~/.codex/auth.json`
 - optional `OPENAI_API_KEY` fallback
 - existing `~/.codex/auth.json` is reused automatically during container creation
+
+Claude Code:
+
+- `~/.config/claude-code/auth.json`
+- `~/.claude.json`
+- optional `ANTHROPIC_API_KEY` fallback
 
 ### Generated artifacts
 
@@ -143,23 +154,14 @@ Actions:
 
 - waits for the container to start
 - streams logs during provisioning
-- waits for `agent` and expected tools
-- attaches in tmux as `agent`
+- waits for `agent`, `paseo`, and the expected agent CLI
+- prints the current `paseo` pairing payload before attach when available
+- attaches in a shell as `agent`
 - starts in the configured work directory
 - mounts the host `~/.codex` into `/home/agent/.codex` so Codex state is shared across projects
 - does not auto-run the coding agent on attach
 - installs Codex behind a `codex` wrapper so the normal command includes the saved args
-
-## Container Bootstrap
-
-The generated vault reuses these repo scripts inside the container:
-
-- `scripts/setup-zsh.sh`
-- `scripts/setup-nvim.sh`
-- `scripts/setup-tmux.sh`
-
-It does not run `scripts/setup-alacritty.sh` inside the container.
-The generated `agent` account is switched to `zsh` after provisioning.
+- installs Claude Code behind a `claude` wrapper so the normal command includes the saved args
 
 ## Troubleshooting
 
@@ -171,6 +173,7 @@ and Kata-backed pod lifecycle behavior:
 ```bash
 python3 -m unittest tests/test_agentctl_k3s_integration.py
 ./tests/smoke-agentctl.sh
+./tests/smoke-agentctl-paseo.sh
 ```
 
 They skip cleanly when `kubectl` or the `kata-qemu` RuntimeClass is not

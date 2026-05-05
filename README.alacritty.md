@@ -39,6 +39,8 @@ These shortcuts send tmux prefix (`Ctrl+Space`) sequences and only work inside a
 | `Ctrl+Shift+Left` | Previous tmux window |
 | `Ctrl+Shift+Right` | Next tmux window |
 | `Ctrl+Shift+S` | Open tmux session list |
+| `Ctrl+Shift+Q` | Detach from tmux session |
+| `Ctrl+Shift+R` | Reload tmux config |
 
 Tmux also binds the underlying `p` and `n` window switches in copy mode, so the same Alacritty window shortcuts continue to work there.
 

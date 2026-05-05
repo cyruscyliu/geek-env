@@ -5,6 +5,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KATA_VERSION="3.28.0"
 KATA_TARBALL="kata-static-${KATA_VERSION}-amd64.tar.zst"
 KATA_URL="https://github.com/kata-containers/kata-containers/releases/download/${KATA_VERSION}/${KATA_TARBALL}"
@@ -168,29 +169,6 @@ EOF
   log "RuntimeClasses applied (kata-qemu, kata-clh, kata-qemu-tdx)"
 }
 
-smoke_test() {
-  log "Running smoke test..."
-  k3s kubectl delete pod kata-smoke-test --ignore-not-found=true
-
-  k3s kubectl run kata-smoke-test \
-    --image=busybox \
-    --restart=Never \
-    --overrides='{"spec":{"runtimeClassName":"kata-qemu"}}' \
-    -- echo "kata works"
-
-  log "Waiting for smoke test pod..."
-  k3s kubectl wait --for=condition=Ready pod/kata-smoke-test --timeout=60s 2>/dev/null || true
-  k3s kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/kata-smoke-test --timeout=60s
-
-  local result
-  result="$(k3s kubectl logs kata-smoke-test)"
-  k3s kubectl delete pod kata-smoke-test --ignore-not-found=true
-
-  [[ "$result" == "kata works" ]] \
-    || fail "Smoke test failed. Got: \"$result\""
-  log "Smoke test passed: \"$result\""
-}
-
 main() {
   preflight
   install_dependencies
@@ -199,7 +177,7 @@ main() {
   configure_containerd
   restart_and_wait
   apply_runtimeclass
-  smoke_test
+  "$SCRIPT_DIR/run-kata-smoke-test.sh"
   log "Setup complete. Run: kubectl get nodes && kubectl get runtimeclass"
 }
 
