@@ -416,7 +416,7 @@ def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_ho
         "          echo 'starting paseo daemon' && \\\n"
         f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
         "          echo 'pairing paseo daemon' && \\\n"
-        f'          su - {container_user} -c "for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
+        f'          su - {container_user} -c "for i in \\$(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
 
 
@@ -488,6 +488,10 @@ class AgentConfig:
         return OUTPUT_DIR / f"{self.project_name}.yaml"
 
     @property
+    def project_pvc_name(self) -> str:
+        return f"{self.project_name}-project"
+
+    @property
     def container_user(self) -> str:
         return self.project_name
 
@@ -502,10 +506,6 @@ class AgentConfig:
     @property
     def codex_state_host_path(self) -> str:
         return str(Path.home() / ".codex")
-
-    @property
-    def paseo_state_host_path(self) -> str:
-        return f"{self.host_path.rstrip('/')}/.agent-state/paseo"
 
     def to_config_dict(self) -> dict:
         return {
@@ -693,6 +693,24 @@ class AgentConfig:
                 )
             )
 
+        docs.append(
+            "\n".join(
+                [
+                    "apiVersion: v1",
+                    "kind: PersistentVolumeClaim",
+                    "metadata:",
+                    f"  name: {self.project_pvc_name}",
+                    f"  namespace: {self.project_name}",
+                    "spec:",
+                    "  accessModes:",
+                    "  - ReadWriteOnce",
+                    "  resources:",
+                    "    requests:",
+                    f'      storage: "{self.storage}"',
+                ]
+            )
+        )
+
         deployment_lines = [
             "apiVersion: apps/v1",
             "kind: Deployment",
@@ -732,9 +750,6 @@ class AgentConfig:
             "        volumeMounts:",
             "        - name: project",
             f"          mountPath: {self.mount_path}",
-            "        - name: geek-env",
-            "          mountPath: /opt/geek-env",
-            "          readOnly: true",
         ]
         if self.persist_state:
             deployment_lines.extend(
@@ -746,8 +761,9 @@ class AgentConfig:
         if self.agent_cmd:
             deployment_lines.extend(
                 [
-                    "        - name: paseo-home",
+                    "        - name: project",
                     f"          mountPath: {self.container_home}/.paseo",
+                    "          subPath: .paseo",
                 ]
             )
         for item in self.auth_files:
@@ -781,13 +797,8 @@ class AgentConfig:
             [
                 "      volumes:",
                 "      - name: project",
-                "        hostPath:",
-                f"          path: {self.host_path}",
-                "          type: Directory",
-                "      - name: geek-env",
-                "        hostPath:",
-                f"          path: {REPO_ROOT}",
-                "          type: Directory",
+                "        persistentVolumeClaim:",
+                f"          claimName: {self.project_pvc_name}",
             ]
         )
         if self.persist_state:
@@ -796,15 +807,6 @@ class AgentConfig:
                     "      - name: codex-home",
                     "        hostPath:",
                     f"          path: {self.codex_state_host_path}",
-                    "          type: DirectoryOrCreate",
-                ]
-            )
-        if self.agent_cmd:
-            deployment_lines.extend(
-                [
-                    "      - name: paseo-home",
-                    "        hostPath:",
-                    f"          path: {self.paseo_state_host_path}",
                     "          type: DirectoryOrCreate",
                 ]
             )
@@ -1023,6 +1025,9 @@ def wait_for_deployment_ready(project_name: str, timeout_seconds: int = 900) -> 
                     hint(f"Status: {phase}")
                 last_status = status_key
             if scheduled_reason == "Unschedulable":
+                if "unbound immediate PersistentVolumeClaims" in (scheduled_message or ""):
+                    time.sleep(2)
+                    continue
                 print_deploy_diagnostics(project_name, pod)
                 fail(f"Pod is unschedulable: {scheduled_message or 'scheduler could not place the pod'}")
             if event_reason == "FailedMount":
@@ -1068,6 +1073,9 @@ def wait_for_pod_running(project_name: str, timeout_seconds: int = 300) -> str:
                     hint(f"Status: {phase}")
                 last_status = status_key
             if scheduled_reason == "Unschedulable":
+                if "unbound immediate PersistentVolumeClaims" in (scheduled_message or ""):
+                    time.sleep(2)
+                    continue
                 print_deploy_diagnostics(project_name, pod)
                 fail(f"Pod is unschedulable: {scheduled_message or 'scheduler could not place the pod'}")
             if event_reason == "FailedMount":
@@ -1151,16 +1159,37 @@ def print_paseo_pairing_info(project_name: str, pod: str) -> None:
 def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd: str) -> None:
     ok(f"Attaching to {pod}...")
     maybe_start_log_stream(project_name, pod)
-    wait_for_agent_user(project_name, pod)
-    if agent_cmd:
-        wait_for_project_tools(project_name, pod, agent_cmd)
-        print_paseo_pairing_info(project_name, pod)
     stop_log_stream()
-    subprocess.run(
-        ["kubectl", "-n", project_name, "exec", "-it", pod, "--", "su", "-", project_name, "-c", f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\""],
-        cwd=str(REPO_ROOT),
-        check=False,
-    )
+    deadline = time.time() + 180
+    command = [
+        "kubectl",
+        "-n",
+        project_name,
+        "exec",
+        "-it",
+        pod,
+        "--",
+        "su",
+        "-",
+        project_name,
+        "-c",
+        f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\"",
+    ]
+    while True:
+        data = get_pod_json(project_name, pod)
+        statuses = data.get("status", {}).get("containerStatuses") or []
+        if statuses:
+            state = statuses[0].get("state", {})
+            waiting = state.get("waiting", {})
+            if waiting.get("reason") == "CrashLoopBackOff":
+                print_deploy_diagnostics(project_name, pod)
+                fail(f"{pod} is in CrashLoopBackOff: {waiting.get('message', 'container is not available for exec')}")
+        result = subprocess.run(command, cwd=str(REPO_ROOT), check=False)
+        if result.returncode == 0:
+            return
+        if time.time() >= deadline:
+            fail(f"Could not attach to {pod} after waiting for an exec-ready container")
+        time.sleep(2)
 
 
 def get_deployment_generation(project_name: str, observed: bool = False) -> str:
@@ -1259,12 +1288,6 @@ def render_project_manifest(cfg: AgentConfig) -> None:
 
 def apply_project_manifest(cfg: AgentConfig) -> None:
     render_project_manifest(cfg)
-    host_path = Path(cfg.host_path)
-    if not host_path.exists():
-        host_path.mkdir(parents=True, exist_ok=True)
-        ok(f"Created {host_path}")
-    elif not host_path.is_dir():
-        fail(f"Host path must be a directory for hostPath volume mounts: {cfg.host_path}")
     check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
     ok(f"Applying {cfg.yaml_path}...")
     kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False, namespace=None)
@@ -1300,7 +1323,7 @@ def manage_project(project_name: str) -> None:
     )
 
     if action.startswith("exec"):
-        pod = get_project_pod(project_name, ready_only=True) or get_project_pod(project_name)
+        pod = get_project_pod(project_name) or get_project_pod(project_name, ready_only=True)
         if not pod:
             print("No pod running.")
             return

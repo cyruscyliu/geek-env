@@ -200,7 +200,8 @@ trust_level = "trusted"
 
         self.assertIn(f"          path: {Path.home() / '.codex'}", rendered)
         self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
-        self.assertIn(f"          path: {cfg.paseo_state_host_path}", rendered)
+        self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
+        self.assertIn("subPath: .paseo", rendered)
 
     def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
         cfg = self.make_agent_config(
