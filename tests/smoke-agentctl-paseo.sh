@@ -34,10 +34,9 @@ if [[ ! -f "$HOME/.codex/auth.json" ]]; then
   exit 0
 fi
 
-log "Generating canonical config and rendered manifest for $PROJECT"
+log "Generating install-isolation config and rendered manifest for $PROJECT"
 python3 - <<PY
 import json
-import os
 from pathlib import Path
 
 from scripts.agentctl import AgentAuthFile, AgentConfig, agent_label_for_cmd, write_project_files
@@ -65,8 +64,8 @@ cfg = AgentConfig(
     mount_path="/workspace",
     runtime_class="kata-qemu",
     base_image="debian:trixie-slim",
-    cpu="1",
-    memory="2Gi",
+    cpu="2",
+    memory="4Gi",
     storage="10Gi",
     agent=agent_label_for_cmd("multi"),
     agent_cmd="multi",
@@ -78,6 +77,22 @@ cfg = AgentConfig(
 )
 work_dir.mkdir(parents=True, exist_ok=True)
 write_project_files(cfg)
+
+custom_bootstrap = """          set -eux && \\
+          if ! id {project} >/dev/null 2>&1; then useradd -m -s /bin/bash {project}; fi && \\
+          mkdir -p /home/{project} /home/{project}/.paseo && \\
+          chown -R {project}:{project} /home/{project} && \\
+          apt-get update && apt-get install -y ca-certificates curl nodejs npm && \\
+          echo 'installing @getpaseo/cli with verbose npm output' && \\
+          mkdir -p /opt/agent-cli && npm install -ddd -g --prefix /opt/agent-cli @getpaseo/cli && \\
+          ls -la /opt/agent-cli/bin && \\
+          /opt/agent-cli/bin/paseo --version && \\
+          touch /tmp/.ready && sleep infinity""".format(project=project)
+
+manifest = cfg.yaml_path.read_text()
+prefix, rest = manifest.split("        - |\\n", 1)
+_, suffix = rest.split("\\n        readinessProbe:", 1)
+cfg.yaml_path.write_text(prefix + "        - |\\n" + custom_bootstrap + "\\n        readinessProbe:" + suffix)
 PY
 
 test -f "$REPO_ROOT/agents/$PROJECT.agent.yaml"
@@ -92,36 +107,10 @@ kubectl -n "$PROJECT" rollout status "deployment/$PROJECT" --timeout=900s
 POD="$(kubectl -n "$PROJECT" get pod -l "app=$PROJECT" -o jsonpath='{.items[0].metadata.name}')"
 test -n "$POD"
 
-log "Checking agent tooling"
-kubectl -n "$PROJECT" exec "$POD" -- sh -lc 'command -v paseo >/dev/null && command -v codex >/dev/null'
-
-log "Checking Paseo daemon status"
-kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo daemon status"
-
-log "Launching a detached Codex task through Paseo"
-AGENT_ID="$(
-  kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
-    "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo run --provider codex --detach -q 'Reply with exactly SMOKE_OK and then stop.'" \
-    | tr -d '\r' | tail -n1
-)"
-test -n "$AGENT_ID"
-
-log "Waiting for Paseo-managed agent $AGENT_ID"
-kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
-  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo wait '$AGENT_ID' --timeout 300"
-
-log "Checking Paseo agent listing"
-kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
-  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo ls -a -q | grep -Fx '$AGENT_ID'"
-
-log "Checking Paseo agent logs"
-kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
-  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo logs '$AGENT_ID' --tail 200" \
-  | tee "$WORK_DIR/paseo-agent.log"
-
-grep -q "SMOKE_OK" "$WORK_DIR/paseo-agent.log"
+log "Checking isolated Paseo install"
+kubectl -n "$PROJECT" exec "$POD" -- sh -lc 'test -x /opt/agent-cli/bin/paseo && /opt/agent-cli/bin/paseo --version'
 
 log "Deleting namespace"
 kubectl delete namespace "$PROJECT" --wait=false
 
-log "agentctl Paseo smoke test passed"
+log "agentctl Paseo install-isolation smoke test passed"

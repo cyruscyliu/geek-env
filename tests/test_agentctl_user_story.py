@@ -202,6 +202,18 @@ trust_level = "trusted"
         self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
         self.assertIn(f"          path: {cfg.paseo_state_host_path}", rendered)
 
+    def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
+        cfg = self.make_agent_config(
+            plain_env_vars=[PlainEnvVar("FOO", "bar")],
+        )
+
+        rendered = cfg.yaml_text()
+        volume_mounts_section = rendered.split("        volumeMounts:\n", 1)[1].split("        env:\n", 1)[0]
+
+        self.assertIn("        env:\n", rendered)
+        self.assertIn('        - name: PASEO_HOME\n          value: "/home/fight-cuttlefish-x64/.paseo"', rendered)
+        self.assertNotIn("PASEO_HOME", volume_mounts_section)
+
     def test_claude_config_is_loaded(self) -> None:
         loaded = AgentConfig.from_config_dict(
             {

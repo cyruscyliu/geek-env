@@ -358,13 +358,19 @@ def agent_package_for_cmd(cmd: str) -> str:
 def build_agent_install_line(agent_pkg: str) -> str:
     if not agent_pkg:
         return ""
-    return f"          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli {agent_pkg} && \\\n"
+    return (
+        f"          echo 'installing {agent_pkg}' && \\\n"
+        f"          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli {agent_pkg} && \\\n"
+    )
 
 
 def build_paseo_install_line(enabled: bool) -> str:
     if not enabled:
         return ""
-    return "          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli @getpaseo/cli && \\\n"
+    return (
+        "          echo 'installing @getpaseo/cli' && \\\n"
+        "          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli @getpaseo/cli && \\\n"
+    )
 
 
 def build_paseo_wrapper_line(enabled: bool) -> str:
@@ -407,7 +413,9 @@ def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_ho
     if not agent_cmd:
         return ""
     return (
+        "          echo 'starting paseo daemon' && \\\n"
         f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
+        "          echo 'pairing paseo daemon' && \\\n"
         f'          su - {container_user} -c "for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
 
@@ -620,6 +628,7 @@ class AgentConfig:
         home = self.container_home
         if self.bootstrap_profile == "minimal":
             return (
+                "          set -eux && \\\n"
                 f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
                 f"{build_agent_dirs_line(user, home)}{build_sudoers_line(user)}"
                 "          touch /tmp/.ready && sleep infinity"
@@ -637,6 +646,7 @@ class AgentConfig:
         )
         paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
         return (
+            "          set -eux && \\\n"
             f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
             f"{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
@@ -749,22 +759,24 @@ class AgentConfig:
                     "          readOnly: true",
                 ]
             )
-        if self.plain_env_vars:
-            deployment_lines.append("        env:")
-            for item in self.plain_env_vars:
-                deployment_lines.extend(
-                    [
-                        f"        - name: {item.name}",
-                        f'          value: "{item.value}"',
-                    ]
-                )
+        env_items: list[str] = []
+        for item in self.plain_env_vars:
+            env_items.extend(
+                [
+                    f"        - name: {item.name}",
+                    f'          value: "{item.value}"',
+                ]
+            )
         if self.agent_cmd:
-            deployment_lines.extend(
+            env_items.extend(
                 [
                     "        - name: PASEO_HOME",
                     f'          value: "{self.container_home}/.paseo"',
                 ]
             )
+        if env_items:
+            deployment_lines.append("        env:")
+            deployment_lines.extend(env_items)
         deployment_lines.extend(
             [
                 "      volumes:",
