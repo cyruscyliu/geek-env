@@ -103,15 +103,11 @@ normalizes it to `Gi` before saving the canonical config and rendered manifest.
 
 ### Agent defaults
 
-- `OpenAI Codex` is the default agent
-- `Claude Code` is also supported
-- supported agents prompt once for permissive mode and default to `yes`
-- Codex auto-installs `bubblewrap`
-- permissive Codex launches with `--dangerously-bypass-approvals-and-sandbox`
-- permissive Claude Code launches with `--dangerously-skip-permissions`
-- permissive mode can be disabled during generation for stricter containers
-- supported agents auto-install `paseo`, start the daemon during bootstrap,
-  and persist pairing state under the mounted workspace
+- `Codex` and `Claude Code` are both installed in generated guests
+- local auth files are copied into the guest automatically when present
+- `Codex` auto-installs `bubblewrap`
+- `paseo` is auto-installed, starts during bootstrap, and persists pairing
+  state under the mounted workspace
 
 ### Auth sources
 
@@ -154,11 +150,11 @@ Actions:
 
 - waits for the container to start
 - streams logs during provisioning
-- waits for `agent`, `paseo`, and the expected agent CLI
+- waits for the project user, `paseo`, and the expected agent CLI
 - prints the current `paseo` pairing payload before attach when available
-- attaches in a shell as `agent`
+- attaches in a shell as the project user
 - starts in the configured work directory
-- mounts the host `~/.codex` into `/home/agent/.codex` so Codex state is shared across projects
+- mounts the host `~/.codex` into the project user's home so Codex state is shared across projects
 - does not auto-run the coding agent on attach
 - installs Codex behind a `codex` wrapper so the normal command includes the saved args
 - installs Claude Code behind a `claude` wrapper so the normal command includes the saved args

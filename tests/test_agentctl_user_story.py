@@ -7,12 +7,12 @@ from typing import Any
 
 from scripts.agentctl import (
     AgentConfig,
+    AgentAuthFile,
     InvalidTransitionError,
     PlainEnvVar,
-    SecretEnvVar,
     agent_label_for_cmd,
     build_paseo_bootstrap_line,
-    resolve_agent_args,
+    is_valid_project_name,
     restore_files,
     snapshot_files,
     transition_public_state,
@@ -22,7 +22,7 @@ from scripts.agentctl import (
 class UserStoryGraphTest(unittest.TestCase):
     PROJECT = "fight-cuttlefish-x64"
     WORKSPACE = f"/home/debian/Projects/{PROJECT}"
-    MOUNT_PATH = "/home/agent/work"
+    MOUNT_PATH = f"/home/{PROJECT}"
 
     def make_config(self, **overrides: Any) -> AgentConfig:
         defaults: dict[str, Any] = {
@@ -36,31 +36,24 @@ class UserStoryGraphTest(unittest.TestCase):
             "storage": "20Gi",
             "agent": "None",
             "agent_cmd": "",
-            "permissive_mode": "",
             "agent_args": "",
             "persist_state": False,
             "all_packages": "",
             "bootstrap_profile": "full",
             "install_rustup": False,
             "plain_env_vars": [],
-            "secret_env_vars": [],
+            "auth_files": [],
             "expose_service": False,
             "container_port": "",
             "node_port": "",
-            "agent_secret_name": "",
-            "agent_secret_key": "",
-            "agent_secret_mount_path": "",
-            "agent_secret_content": "",
         }
         defaults.update(overrides)
         return AgentConfig(**defaults)
 
-    def make_codex_config(self, **overrides: Any) -> AgentConfig:
+    def make_agent_config(self, **overrides: Any) -> AgentConfig:
         return self.make_config(
-            agent=agent_label_for_cmd("codex"),
-            agent_cmd="codex",
-            permissive_mode="true",
-            agent_args=resolve_agent_args("codex", "true"),
+            agent=agent_label_for_cmd("multi"),
+            agent_cmd="multi",
             **overrides,
         )
 
@@ -127,22 +120,34 @@ class UserStoryGraphTest(unittest.TestCase):
             self.assertEqual(existing.read_text(), "before\n")
             self.assertFalse(new_file.exists())
 
+    def test_project_name_validation_matches_user_group_constraints(self) -> None:
+        valid = ("morpheus", "morpheus2", "morpheus-dev", "a", "a1")
+        invalid = ("", "2morpheus", "-morpheus", "morpheus-", "Morph", "morpheus_dev", "m" * 33)
+        for name in valid:
+            with self.subTest(name=name):
+                self.assertTrue(is_valid_project_name(name))
+        for name in invalid:
+            with self.subTest(name=name):
+                self.assertFalse(is_valid_project_name(name))
+
     def test_agent_config_round_trip(self) -> None:
-        cfg = self.make_codex_config(
+        cfg = self.make_agent_config(
             cpu="12",
             memory="12Gi",
             storage="80Gi",
             persist_state=True,
             all_packages="bat bubblewrap curl git nodejs npm python3 ripgrep sudo wget",
             plain_env_vars=[PlainEnvVar("FOO", "bar")],
-            secret_env_vars=[SecretEnvVar("OPENAI_API_KEY", "secret")],
+            auth_files=[
+                AgentAuthFile(
+                    key="codex-auth.json",
+                    mount_path=f"/home/{self.PROJECT}/.codex/auth.json",
+                    content='{"auth_mode":"chatgpt"}',
+                )
+            ],
             expose_service=True,
             container_port="8080",
             node_port="30800",
-            agent_secret_name="fight-cuttlefish-x64-codex-auth",
-            agent_secret_key="auth.json",
-            agent_secret_mount_path="/home/agent/.codex/auth.json",
-            agent_secret_content='{"auth_mode":"chatgpt"}',
         )
 
         loaded = AgentConfig.from_config_dict(cfg.to_config_dict())
@@ -167,16 +172,16 @@ class UserStoryGraphTest(unittest.TestCase):
             with self.subTest(field=field_name):
                 self.assertEqual(getattr(loaded, field_name), getattr(cfg, field_name))
         self.assertEqual(loaded.plain_env_vars[0].name, "FOO")
-        self.assertEqual(loaded.secret_env_vars[0].name, "OPENAI_API_KEY")
+        self.assertEqual(loaded.auth_files[0].key, "codex-auth.json")
         self.assertTrue(loaded.expose_service)
 
     def test_persisted_codex_state_uses_shared_home_directory(self) -> None:
-        cfg = self.make_codex_config(persist_state=True)
+        cfg = self.make_agent_config(persist_state=True)
 
         rendered = cfg.yaml_text()
 
         self.assertIn(f"          path: {Path.home() / '.codex'}", rendered)
-        self.assertIn("mountPath: /home/agent/.paseo", rendered)
+        self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
         self.assertIn(f"          path: {cfg.paseo_state_host_path}", rendered)
 
     def test_claude_config_is_loaded(self) -> None:
@@ -197,10 +202,10 @@ class UserStoryGraphTest(unittest.TestCase):
                     "ephemeral_storage": "20Gi",
                 },
                 "agent": {
-                    "kind": "claude",
-                    "label": "Claude Code (Anthropic)",
-                    "permissive": True,
-                    "args": ["--dangerously-skip-permissions"],
+                    "kind": "multi",
+                    "label": "Codex + Claude Code",
+                    "permissive": False,
+                    "args": [],
                     "persist_state": True,
                 },
                 "tooling": {
@@ -208,14 +213,21 @@ class UserStoryGraphTest(unittest.TestCase):
                     "apt_packages": [],
                     "install_rustup": False,
                 },
+                "auth": {
+                    "files": [
+                        {
+                            "key": "claude-auth.json",
+                            "mount_path": f"/home/{self.PROJECT}/.config/claude-code/auth.json",
+                            "content": "{}",
+                        }
+                    ]
+                },
             }
         )
 
-        self.assertEqual(loaded.agent_cmd, "claude")
-        self.assertEqual(loaded.agent, "Claude Code (Anthropic)")
-
-    def test_claude_permissive_args_are_resolved(self) -> None:
-        self.assertEqual(resolve_agent_args("claude", "true"), "--dangerously-skip-permissions")
+        self.assertEqual(loaded.agent_cmd, "multi")
+        self.assertEqual(loaded.agent, "Codex + Claude Code")
+        self.assertEqual(loaded.auth_files[0].key, "claude-auth.json")
 
     def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
         cfg = self.make_config(
@@ -227,12 +239,20 @@ class UserStoryGraphTest(unittest.TestCase):
         self.assertIn("NOPASSWD: ALL", rendered)
 
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
-        rendered = build_paseo_bootstrap_line("codex")
+        rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
         self.assertIn("paseo daemon start", rendered)
         self.assertIn("paseo daemon pair --json", rendered)
 
+    def test_container_identity_uses_project_name(self) -> None:
+        cfg = self.make_agent_config()
+        rendered = cfg.build_container_bootstrap_lines()
+        self.assertEqual(cfg.container_user, self.PROJECT)
+        self.assertEqual(cfg.container_home, f"/home/{self.PROJECT}")
+        self.assertIn(f"useradd -m -s /bin/bash {self.PROJECT}", rendered)
+        self.assertIn(f"{self.PROJECT} ALL=(ALL) NOPASSWD: ALL", rendered)
+
     def test_full_bootstrap_does_not_include_shell_editor_mux_setup(self) -> None:
-        cfg = self.make_codex_config(
+        cfg = self.make_agent_config(
             host_path="/tmp/fight-cuttlefish-x64",
             cpu="1",
             memory="2Gi",

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,12 +19,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal
+from prompt_toolkit import prompt as pt_prompt
+from prompt_toolkit.completion import PathCompleter
+from prompt_toolkit.formatted_text import ANSI
 import yaml
-
-try:
-    import readline
-except ImportError:  # pragma: no cover
-    readline = None
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -145,57 +144,17 @@ def prompt(question: str, default: str = "") -> str:
 
 
 def prompt_path(question: str, default: str = "") -> str:
-    if readline is None:
-        return prompt(question, default)
-
-    old_completer = readline.get_completer()
-    old_delims = readline.get_completer_delims()
-
-    def complete_path(text: str, state: int) -> str | None:
-        buffer = readline.get_line_buffer()
-        expanded = os.path.expanduser(buffer)
-        if not expanded:
-            expanded = "."
-        if expanded.endswith(os.sep):
-            directory = expanded
-            prefix = ""
-        else:
-            directory = os.path.dirname(expanded) or "."
-            prefix = os.path.basename(expanded)
-        try:
-            entries = sorted(os.listdir(directory))
-        except OSError:
-            return None
-
-        matches: list[str] = []
-        for entry in entries:
-            if not entry.startswith(prefix):
-                continue
-            candidate = os.path.join(directory, entry)
-            display = os.path.join(os.path.dirname(buffer), entry) if buffer and not buffer.endswith(os.sep) else os.path.join(buffer, entry) if buffer else entry
-            if directory == "." and not buffer.startswith(("/", "~")):
-                display = entry
-            if os.path.isdir(candidate):
-                display += os.sep
-            matches.append(display)
-        return matches[state] if state < len(matches) else None
-
-    try:
-        readline.set_completer_delims(" \t\n;")
-        readline.set_completer(complete_path)
-        readline.parse_and_bind("tab: complete")
-        if default:
-            readline.set_startup_hook(lambda: readline.insert_text(default))
-            raw = input(f"{BOLD}{question}{RESET} {DIM}[{default}]{RESET}: ")
-        else:
-            raw = input(f"{BOLD}{question}{RESET}: ")
-        if is_back_token(raw):
-            raise BackSignal()
-        return raw.strip() or default
-    finally:
-        readline.set_startup_hook()
-        readline.set_completer(old_completer)
-        readline.set_completer_delims(old_delims)
+    completer = PathCompleter(expanduser=True)
+    suffix = f" {DIM}[{default}]{RESET}" if default else ""
+    raw = pt_prompt(
+        ANSI(f"{BOLD}{question}{RESET}{suffix}: "),
+        default=default,
+        completer=completer,
+        complete_while_typing=True,
+    )
+    if is_back_token(raw):
+        raise BackSignal()
+    return raw.strip() or default
 
 
 def choose(question: str, options: list[str], default_idx: int = 0) -> str:
@@ -307,6 +266,10 @@ def normalize_binary_quantity(value: str, field: str) -> str:
     fail(f"{field} must include a Kubernetes binary unit such as Mi, Gi, or Ti")
 
 
+def is_valid_project_name(value: str) -> bool:
+    return re.fullmatch(r"[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?", value) is not None
+
+
 def cpu_to_millicores(value: str) -> int:
     if re.fullmatch(r"\d+m", value):
         return int(value[:-1])
@@ -348,14 +311,39 @@ def sort_unique_words(words: Iterable[str]) -> str:
     return " ".join(sorted({word for word in words if word}))
 
 
+def host_cpu_count() -> str:
+    count = os.cpu_count()
+    return str(count) if count else "unknown"
+
+
+def host_available_disk(path: str) -> str:
+    try:
+        usage = shutil.disk_usage(path or ".")
+    except OSError:
+        return "unknown"
+    return format_binary_bytes(usage.free)
+
+
+def host_total_memory() -> str:
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return "unknown"
+    if not isinstance(page_size, int) or not isinstance(phys_pages, int):
+        return "unknown"
+    return format_binary_bytes(page_size * phys_pages)
+
+
 def baseline_packages() -> str:
-    return "sudo ca-certificates curl wget git jq python3 python3-pip ripgrep fd-find bat"
+    return "sudo ca-certificates curl wget git jq python3 python3-pip ripgrep fd-find bat build-essential nodejs npm bubblewrap"
 
 
 def agent_label_for_cmd(cmd: str) -> str:
     return {
         "codex": "OpenAI Codex",
         "claude": "Claude Code",
+        "multi": "Codex + Claude Code",
         "": "None",
         "none": "None",
     }.get(cmd, cmd)
@@ -366,15 +354,6 @@ def agent_package_for_cmd(cmd: str) -> str:
         "codex": "@openai/codex",
         "claude": "@anthropic-ai/claude-code",
     }.get(cmd, "")
-
-
-def resolve_agent_args(agent_cmd: str, permissive_mode: str) -> str:
-    if agent_cmd == "codex" and permissive_mode == "true":
-        return "--dangerously-bypass-approvals-and-sandbox"
-    if agent_cmd == "claude" and permissive_mode == "true":
-        return "--dangerously-skip-permissions"
-    return ""
-
 
 def build_agent_install_line(agent_pkg: str) -> str:
     if not agent_pkg:
@@ -409,27 +388,27 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
     )
 
 
-def build_agent_dirs_line() -> str:
+def build_agent_dirs_line(container_user: str, container_home: str) -> str:
     return (
-        "          mkdir -p /home/agent /home/agent/.codex /home/agent/.config/claude-code /home/agent/.paseo && \\\n"
-        "          chown -R agent:agent /home/agent /home/agent/.codex /home/agent/.config /home/agent/.paseo && \\\n"
+        f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.config/claude-code {container_home}/.paseo && \\\n"
+        f"          chown -R {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.config {container_home}/.paseo && \\\n"
     )
 
 
-def build_sudoers_line() -> str:
+def build_sudoers_line(container_user: str) -> str:
     return (
         "          mkdir -p /etc/sudoers.d && \\\n"
-        '          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\\n'
-        "          chmod 440 /etc/sudoers.d/agent && \\\n"
+        f'          echo "{container_user} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/{container_user} && \\\n'
+        f"          chmod 440 /etc/sudoers.d/{container_user} && \\\n"
     )
 
 
-def build_paseo_bootstrap_line(agent_cmd: str) -> str:
+def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_home: str) -> str:
     if not agent_cmd:
         return ""
     return (
-        '          su - agent -c "PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
-        '          su - agent -c "for i in $(seq 1 30); do PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon pair --json > /home/agent/.paseo/pairing.json.tmp 2>/dev/null && mv /home/agent/.paseo/pairing.json.tmp /home/agent/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
+        f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
+        f'          su - {container_user} -c "for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
 
 
@@ -439,15 +418,16 @@ def indent_block(text: str, spaces: int) -> str:
 
 
 @dataclass
-class SecretEnvVar:
+class PlainEnvVar:
     name: str
     value: str
 
 
 @dataclass
-class PlainEnvVar:
-    name: str
-    value: str
+class AgentAuthFile:
+    key: str
+    mount_path: str
+    content: str
 
 
 @dataclass
@@ -462,21 +442,16 @@ class AgentConfig:
     storage: str
     agent: str
     agent_cmd: str
-    permissive_mode: str
     agent_args: str
     all_packages: str
     persist_state: bool = True
     bootstrap_profile: str = "full"
     install_rustup: bool = False
     plain_env_vars: list[PlainEnvVar] = field(default_factory=list)
-    secret_env_vars: list[SecretEnvVar] = field(default_factory=list)
+    auth_files: list[AgentAuthFile] = field(default_factory=list)
     expose_service: bool = False
     container_port: str = ""
     node_port: str = ""
-    agent_secret_name: str = ""
-    agent_secret_key: str = ""
-    agent_secret_mount_path: str = ""
-    agent_secret_content: str = ""
 
     @property
     def config_path(self) -> Path:
@@ -485,6 +460,14 @@ class AgentConfig:
     @property
     def yaml_path(self) -> Path:
         return OUTPUT_DIR / f"{self.project_name}.yaml"
+
+    @property
+    def container_user(self) -> str:
+        return self.project_name
+
+    @property
+    def container_home(self) -> str:
+        return f"/home/{self.container_user}"
 
     @property
     def agent_state_host_path(self) -> str:
@@ -517,7 +500,6 @@ class AgentConfig:
             "agent": {
                 "kind": self.agent_cmd or "none",
                 "label": self.agent,
-                "permissive": self.permissive_mode == "true",
                 "args": self.agent_args.split() if self.agent_args else [],
                 "persist_state": self.persist_state,
             },
@@ -527,14 +509,17 @@ class AgentConfig:
                 "install_rustup": self.install_rustup,
             },
             "auth": {
-                "secret_name": self.agent_secret_name or None,
-                "secret_key": self.agent_secret_key or None,
-                "mount_path": self.agent_secret_mount_path or None,
-                "content": self.agent_secret_content or None,
+                "files": [
+                    {
+                        "key": item.key,
+                        "mount_path": item.mount_path,
+                        "content": item.content,
+                    }
+                    for item in self.auth_files
+                ],
             },
             "env": {
                 "plain": {item.name: item.value for item in self.plain_env_vars},
-                "secret": {item.name: item.value for item in self.secret_env_vars},
             },
             "service": {
                 "enabled": self.expose_service,
@@ -557,22 +542,34 @@ class AgentConfig:
         env = data.get("env", {}) or {}
         service = data.get("service", {}) or {}
         plain = env.get("plain", {}) or {}
-        secret = env.get("secret", {}) or {}
         saved_kind = agent.get("kind") or ""
-        kind = saved_kind if saved_kind in {"", "none", "codex", "claude"} else "none"
+        kind = saved_kind if saved_kind in {"", "none", "codex", "claude", "multi"} else "none"
         label = (
             agent.get("label")
-            if saved_kind in {"", "none", "codex", "claude"}
+            if saved_kind in {"", "none", "codex", "claude", "multi"}
             else {
                 "none": "None",
                 "": "None",
             }.get(kind, kind)
         ) or agent_label_for_cmd(kind)
         args = agent.get("args", []) or []
+        auth_files_data = auth.get("files", []) or []
+        if not auth_files_data:
+            legacy_mount_path = auth.get("mount_path") or ""
+            legacy_key = auth.get("secret_key") or ""
+            legacy_content = auth.get("content") or ""
+            if legacy_mount_path and legacy_key and legacy_content:
+                auth_files_data = [
+                    {
+                        "key": legacy_key,
+                        "mount_path": legacy_mount_path,
+                        "content": legacy_content,
+                    }
+                ]
         return cls(
             project_name=data["project"],
             host_path=workspace.get("host_path", ""),
-            mount_path=workspace.get("mount_path", "/home/agent/work"),
+            mount_path=workspace.get("mount_path", f"/home/{data['project']}"),
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
             cpu=str(resources.get("cpu", "2")),
@@ -580,45 +577,53 @@ class AgentConfig:
             storage=normalize_binary_quantity(str(resources.get("ephemeral_storage", "20Gi")), "Saved storage limit"),
             agent=label,
             agent_cmd="" if kind == "none" else kind,
-            permissive_mode="true" if agent.get("permissive") and kind and kind != "none" else ("false" if kind and kind != "none" else ""),
             agent_args=" ".join(args),
             persist_state=bool(agent.get("persist_state", True)),
             bootstrap_profile=tooling.get("bootstrap_profile", "full"),
             all_packages=" ".join(tooling.get("apt_packages", []) or []),
             install_rustup=bool(tooling.get("install_rustup", False)),
             plain_env_vars=[PlainEnvVar(name, value) for name, value in plain.items()],
-            secret_env_vars=[SecretEnvVar(name, value) for name, value in secret.items()],
+            auth_files=[
+                AgentAuthFile(
+                    key=item.get("key", ""),
+                    mount_path=item.get("mount_path", ""),
+                    content=item.get("content", ""),
+                )
+                for item in auth_files_data
+                if item.get("key") and item.get("mount_path") and item.get("content")
+            ],
             expose_service=bool(service.get("enabled", False)),
             container_port=str(service.get("container_port") or ""),
             node_port=str(service.get("node_port") or ""),
-            agent_secret_name=auth.get("secret_name") or "",
-            agent_secret_key=auth.get("secret_key") or "",
-            agent_secret_mount_path=auth.get("mount_path") or "",
-            agent_secret_content=auth.get("content") or "",
         )
 
     def build_container_bootstrap_lines(self) -> str:
+        user = self.container_user
+        home = self.container_home
         if self.bootstrap_profile == "minimal":
             return (
-                "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-                f"{build_agent_dirs_line()}{build_sudoers_line()}"
+                f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
+                f"{build_agent_dirs_line(user, home)}{build_sudoers_line(user)}"
                 "          touch /tmp/.ready && sleep infinity"
             )
-        rustup_line = ""
-        if self.install_rustup:
-            rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su agent -c 'sh -s -- -y' && \\\n"
-        agent_pkg = agent_package_for_cmd(self.agent_cmd)
-        agent_install_line = build_agent_install_line(agent_pkg)
-        paseo_install_line = build_paseo_install_line(bool(self.agent_cmd))
-        paseo_wrapper_line = build_paseo_wrapper_line(bool(self.agent_cmd))
-        agent_wrapper_line = build_agent_wrapper_line(self.agent_cmd, self.agent_args)
-        paseo_bootstrap_line = build_paseo_bootstrap_line(self.agent_cmd)
+        rustup_line = f"          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su {user} -c 'sh -s -- -y' && \\\n"
+        agent_install_line = (
+            build_agent_install_line(agent_package_for_cmd("codex"))
+            + build_agent_install_line(agent_package_for_cmd("claude"))
+        )
+        paseo_install_line = build_paseo_install_line(True)
+        paseo_wrapper_line = build_paseo_wrapper_line(True)
+        agent_wrapper_line = (
+            build_agent_wrapper_line("codex", "")
+            + build_agent_wrapper_line("claude", "")
+        )
+        paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
         return (
-            "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
-            f"{build_agent_dirs_line()}"
+            f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
+            f"{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
             f"            {self.all_packages} && \\\n"
-            f"{build_sudoers_line()}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{paseo_bootstrap_line}"
+            f"{build_sudoers_line(user)}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -637,33 +642,25 @@ class AgentConfig:
             )
         ]
 
-        if self.secret_env_vars:
-            secret_lines = [
-                "apiVersion: v1",
-                "kind: Secret",
-                "metadata:",
-                f"  name: {self.project_name}-secrets",
-                f"  namespace: {self.project_name}",
-                "type: Opaque",
-                "stringData:",
-            ]
-            for item in self.secret_env_vars:
-                secret_lines.append(f'  {item.name}: "{item.value}"')
-            docs.append("\n".join(secret_lines))
-
-        if self.agent_secret_content:
+        if self.auth_files:
             docs.append(
                 "\n".join(
                     [
                         "apiVersion: v1",
                         "kind: Secret",
                         "metadata:",
-                        f"  name: {self.agent_secret_name}",
+                        f"  name: {self.project_name}-agent-auth",
                         f"  namespace: {self.project_name}",
                         "type: Opaque",
                         "stringData:",
-                        f"  {self.agent_secret_key}: |",
-                        indent_block(self.agent_secret_content, 4),
+                    ]
+                    + [
+                        line
+                        for item in self.auth_files
+                        for line in [
+                            f"  {item.key}: |",
+                            indent_block(item.content, 4),
+                        ]
                     ]
                 )
             )
@@ -715,26 +712,26 @@ class AgentConfig:
             deployment_lines.extend(
                 [
                     "        - name: codex-home",
-                    "          mountPath: /home/agent/.codex",
+                    f"          mountPath: {self.container_home}/.codex",
                 ]
             )
         if self.agent_cmd:
             deployment_lines.extend(
                 [
                     "        - name: paseo-home",
-                    "          mountPath: /home/agent/.paseo",
+                    f"          mountPath: {self.container_home}/.paseo",
                 ]
             )
-        if self.agent_secret_content:
+        for item in self.auth_files:
             deployment_lines.extend(
                 [
                     "        - name: agent-auth",
-                    f"          mountPath: {self.agent_secret_mount_path}",
-                    f"          subPath: {self.agent_secret_key}",
+                    f"          mountPath: {item.mount_path}",
+                    f"          subPath: {item.key}",
                     "          readOnly: true",
                 ]
             )
-        if self.plain_env_vars or self.secret_env_vars:
+        if self.plain_env_vars:
             deployment_lines.append("        env:")
             for item in self.plain_env_vars:
                 deployment_lines.extend(
@@ -743,21 +740,11 @@ class AgentConfig:
                         f'          value: "{item.value}"',
                     ]
                 )
-            for item in self.secret_env_vars:
-                deployment_lines.extend(
-                    [
-                        f"        - name: {item.name}",
-                        "          valueFrom:",
-                        "            secretKeyRef:",
-                        f"              name: {self.project_name}-secrets",
-                        f"              key: {item.name}",
-                    ]
-                )
         if self.agent_cmd:
             deployment_lines.extend(
                 [
                     "        - name: PASEO_HOME",
-                    '          value: "/home/agent/.paseo"',
+                    f'          value: "{self.container_home}/.paseo"',
                 ]
             )
         deployment_lines.extend(
@@ -791,12 +778,12 @@ class AgentConfig:
                     "          type: DirectoryOrCreate",
                 ]
             )
-        if self.agent_secret_content:
+        if self.auth_files:
             deployment_lines.extend(
                 [
                     "      - name: agent-auth",
                     "        secret:",
-                    f"          secretName: {self.agent_secret_name}",
+                    f"          secretName: {self.project_name}-agent-auth",
                 ]
             )
         docs.append("\n".join(deployment_lines))
@@ -1065,7 +1052,7 @@ def wait_for_pod_running(project_name: str, timeout_seconds: int = 300) -> str:
 def wait_for_agent_user(project_name: str, pod: str, timeout_seconds: int = 180) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        result = kubectl(["exec", pod, "--", "sh", "-lc", "id agent >/dev/null 2>&1"], namespace=project_name, check=False)
+        result = kubectl(["exec", pod, "--", "sh", "-lc", f"id {shlex.quote(project_name)} >/dev/null 2>&1"], namespace=project_name, check=False)
         if result.returncode == 0:
             return
         time.sleep(2)
@@ -1076,7 +1063,7 @@ def wait_for_agent_user(project_name: str, pod: str, timeout_seconds: int = 180)
 def wait_for_project_tools(project_name: str, pod: str, agent_cmd: str, timeout_seconds: int = 600) -> None:
     checks = "true"
     if agent_cmd:
-        checks = f"command -v {shlex.quote(agent_cmd)} >/dev/null 2>&1 && command -v paseo >/dev/null 2>&1"
+        checks = "command -v codex >/dev/null 2>&1 && command -v claude >/dev/null 2>&1 && command -v paseo >/dev/null 2>&1"
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         result = kubectl(["exec", pod, "--", "sh", "-lc", checks], namespace=project_name, check=False)
@@ -1085,22 +1072,23 @@ def wait_for_project_tools(project_name: str, pod: str, agent_cmd: str, timeout_
         time.sleep(2)
     print_deploy_diagnostics(project_name, pod)
     if agent_cmd:
-        fail(f"paseo and {agent_cmd} did not become available in {pod} after {timeout_seconds}s")
+        fail(f"codex, claude, and paseo did not become available in {pod} after {timeout_seconds}s")
     fail(f"Project tools did not become available in {pod} after {timeout_seconds}s")
 
 
 def read_paseo_pairing_info(project_name: str, pod: str, timeout_seconds: int = 120) -> dict:
     deadline = time.time() + timeout_seconds
+    container_home = f"/home/{project_name}"
     cmd = (
-        "if [ -s /home/agent/.paseo/pairing.json ]; then "
-        "cat /home/agent/.paseo/pairing.json; "
+        f"if [ -s {container_home}/.paseo/pairing.json ]; then "
+        f"cat {container_home}/.paseo/pairing.json; "
         "else "
-        "PASEO_HOME=/home/agent/.paseo /opt/agent-cli/bin/paseo daemon pair --json; "
+        f"PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json; "
         "fi"
     )
     while time.time() < deadline:
         result = kubectl(
-            ["exec", pod, "--", "su", "-", "agent", "-c", cmd],
+            ["exec", pod, "--", "su", "-", project_name, "-c", cmd],
             namespace=project_name,
             check=False,
         )
@@ -1139,7 +1127,7 @@ def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd:
         print_paseo_pairing_info(project_name, pod)
     stop_log_stream()
     subprocess.run(
-        ["kubectl", "-n", project_name, "exec", "-it", pod, "--", "su", "-", "agent", "-c", f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\""],
+        ["kubectl", "-n", project_name, "exec", "-it", pod, "--", "su", "-", project_name, "-c", f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\""],
         cwd=str(REPO_ROOT),
         check=False,
     )
@@ -1248,7 +1236,7 @@ def apply_project_manifest(cfg: AgentConfig) -> None:
 
 def manage_project(project_name: str) -> None:
     cfg = load_project_config(project_name)
-    mount_path = cfg.mount_path or "/home/agent/work"
+    mount_path = cfg.mount_path or f"/home/{cfg.project_name}"
     agent_cmd = cfg.agent_cmd
 
     exists = kubectl(["get", "deployment", project_name], namespace=project_name, check=False)
@@ -1332,86 +1320,77 @@ def find_first_existing(paths: Iterable[Path]) -> Path | None:
     return None
 
 
-def gather_agent_auth(agent_cmd: str, project_name: str) -> tuple[str, str, str, str]:
-    if agent_cmd == "codex":
-        auth_path = Path.home() / ".codex" / "auth.json"
-        if not auth_path.exists():
-            hint("No existing Codex auth file found on this host.")
-            hint("Running codex auth login so the container can reuse host auth.")
-            if command_exists("codex"):
-                subprocess.run(["codex", "auth", "login"], cwd=str(REPO_ROOT), check=False)
-        if auth_path.exists():
-            data = json.loads(auth_path.read_text())
-            if data.get("auth_mode") == "chatgpt":
-                ok(f"Read Codex OAuth credentials from {auth_path}")
-                return f"{project_name}-codex-auth", "auth.json", "/home/agent/.codex/auth.json", auth_path.read_text()
-        warn("Could not auto-read Codex OAuth credentials from host")
-    if agent_cmd == "claude":
-        auth_path = find_first_existing(
-            [
-                Path.home() / ".config" / "claude-code" / "auth.json",
-                Path.home() / ".claude.json",
-            ]
+def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
+    container_home = f"/home/{project_name}"
+    auth_files: list[AgentAuthFile] = []
+
+    codex_auth_path = Path.home() / ".codex" / "auth.json"
+    if codex_auth_path.exists():
+        data = json.loads(codex_auth_path.read_text())
+        if data.get("auth_mode") == "chatgpt":
+            ok(f"Read Codex OAuth credentials from {codex_auth_path}")
+            auth_files.append(
+                AgentAuthFile(
+                    key="codex-auth.json",
+                    mount_path=f"{container_home}/.codex/auth.json",
+                    content=codex_auth_path.read_text(),
+                )
+            )
+    else:
+        hint("No existing Codex auth file found on this host.")
+
+    claude_auth_path = find_first_existing(
+        [
+            Path.home() / ".config" / "claude-code" / "auth.json",
+            Path.home() / ".claude.json",
+        ]
+    )
+    if claude_auth_path is not None:
+        ok(f"Read Claude Code credentials from {claude_auth_path}")
+        auth_files.append(
+            AgentAuthFile(
+                key="claude-auth.json",
+                mount_path=f"{container_home}/.config/claude-code/auth.json",
+                content=claude_auth_path.read_text(),
+            )
         )
-        if auth_path is None:
-            hint("No existing Claude Code auth file found on this host.")
-            hint("Run claude and complete login so the container can reuse host auth.")
-        else:
-            ok(f"Read Claude Code credentials from {auth_path}")
-            return f"{project_name}-claude-auth", "auth.json", "/home/agent/.config/claude-code/auth.json", auth_path.read_text()
-        warn("Could not auto-read Claude Code credentials from host")
-    return "", "", "", ""
+    else:
+        hint("No existing Claude Code auth file found on this host.")
+
+    return auth_files
 
 
-def derive_toolchain_defaults(cfg: AgentConfig | None) -> tuple[list[str], str]:
+def derive_extra_package_defaults(cfg: AgentConfig | None) -> str:
     if cfg is None:
-        return [], ""
+        return ""
     baseline = set(baseline_packages().split())
     installed = set(cfg.all_packages.split())
-    defaults: list[str] = []
-    if {"nodejs", "npm"}.issubset(installed):
-        defaults.append("nodejs npm")
-        installed -= {"nodejs", "npm"}
-    if "golang" in installed:
-        defaults.append("golang")
-        installed.remove("golang")
-    if cfg.install_rustup:
-        defaults.append("rustup")
-    if "build-essential" in installed:
-        defaults.append("build-essential")
-        installed.remove("build-essential")
     extras = installed - baseline
     if cfg.agent_cmd == "codex":
         extras.discard("bubblewrap")
-    return defaults, " ".join(sorted(extras))
+    return " ".join(sorted(extras))
 
 
 def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfig:
-    toolchain_defaults, extra_defaults = derive_toolchain_defaults(initial)
+    extra_defaults = derive_extra_package_defaults(initial)
     state: dict[str, object] = {
         "project_name": initial.project_name if initial else "",
         "host_path": initial.host_path if initial else "",
-        "mount_path": initial.mount_path if initial else "/home/agent/work",
+        "mount_path": initial.mount_path if initial else "",
         "runtime_class": initial.runtime_class if initial else "kata-qemu",
         "base_image": initial.base_image if initial else "debian:trixie-slim",
-        "toolchains": toolchain_defaults,
         "extra_packages": extra_defaults,
         "cpu": initial.cpu if initial else "2",
         "memory": initial.memory if initial else "4Gi",
         "storage": initial.storage if initial else "20Gi",
-        "agent": initial.agent if initial else "OpenAI Codex",
-        "agent_cmd": initial.agent_cmd if initial else "codex",
-        "permissive_mode": initial.permissive_mode if initial else "true",
-        "agent_args": initial.agent_args if initial else resolve_agent_args("codex", "true"),
+        "agent": initial.agent if initial else "Codex + Claude Code",
+        "agent_cmd": initial.agent_cmd if initial else "multi",
+        "agent_args": initial.agent_args if initial else "",
         "plain_env_vars": [PlainEnvVar(item.name, item.value) for item in (initial.plain_env_vars if initial else [])],
-        "secret_env_vars": [SecretEnvVar(item.name, item.value) for item in (initial.secret_env_vars if initial else [])],
+        "auth_files": [AgentAuthFile(item.key, item.mount_path, item.content) for item in (initial.auth_files if initial else [])],
         "expose_service": initial.expose_service if initial else False,
         "container_port": initial.container_port if initial else "",
         "node_port": initial.node_port if initial else "",
-        "agent_secret_name": initial.agent_secret_name if initial else "",
-        "agent_secret_key": initial.agent_secret_key if initial else "",
-        "agent_secret_mount_path": initial.agent_secret_mount_path if initial else "",
-        "agent_secret_content": initial.agent_secret_content if initial else "",
     }
 
     def render_header(step: int, title: str) -> None:
@@ -1422,15 +1401,16 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         print("  ╚═══════════════════════════════════════╝")
         print(f"{RESET}")
         print("  Deploys a Kata-isolated coding agent on k3s.\n")
-        header(f"[{step}/8] {title}")
+        header(f"[{step}/6] {title}")
 
     def step_project() -> None:
         project_name = prompt("Project name (used as namespace + deployment name)", str(state["project_name"]))
-        while not project_name or not re.fullmatch(r"[a-z0-9-]+", project_name):
-            warn("Name must be lowercase letters, numbers, hyphens only")
+        while not project_name or not is_valid_project_name(project_name):
+            warn("Name must start with a lowercase letter, use only lowercase letters, numbers, or hyphens, end with a letter or number, and stay within 32 characters for user/group compatibility")
             project_name = prompt("Project name", project_name)
         state["project_name"] = project_name
-        default_host_path = str(state["host_path"]) or f"/home/{os.environ.get('SUDO_USER') or os.environ.get('USER')}/Projects/{project_name}"
+        default_home = os.path.expanduser(f"~{os.environ.get('SUDO_USER') or os.environ.get('USER')}")
+        default_host_path = str(state["host_path"]) or os.path.join(default_home, project_name)
         host_path = prompt_path("Host path to mount", default_host_path)
         if not Path(host_path).exists():
             warn(f"Directory does not exist: {host_path}")
@@ -1438,7 +1418,8 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
                 Path(host_path).mkdir(parents=True, exist_ok=True)
                 ok(f"Created {host_path}")
         state["host_path"] = host_path
-        state["mount_path"] = prompt_path("Mount path inside container", str(state["mount_path"]))
+        default_mount_path = str(state["mount_path"]) or f"/home/{project_name}"
+        state["mount_path"] = prompt_path("Mount path inside container", default_mount_path)
 
     def step_runtime() -> None:
         runtime_options = [
@@ -1462,16 +1443,16 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         picked = choose("Base container image", base_options, default_idx=default_idx)
         state["base_image"] = prompt("Enter custom image (e.g. myrepo/myimage:tag)", current) if picked == "custom" else picked
 
-    def step_toolchains() -> None:
-        hint("Always installed: python3 python3-pip git curl wget jq ripgrep fd-find bat")
-        options = ["nodejs npm", "golang", "rustup", "build-essential"]
-        defaults = [options.index(item) + 1 for item in list(state["toolchains"]) if item in options]
-        state["toolchains"] = multichoose("Additional toolchains", options, defaults=defaults)
+    def step_packages() -> None:
+        hint("Always installed: python3 python3-pip git curl wget jq ripgrep fd-find bat build-essential nodejs npm rustup")
         state["extra_packages"] = prompt("Any additional apt packages (space-separated, or leave blank)", str(state["extra_packages"]))
 
     def step_resources() -> None:
         hint("These are hard limits for the Kata VM. OOM = VM dies, not your host.")
         hint("Memory and storage values use Kubernetes binary units. Bare numbers default to Gi.")
+        hint(f"Host reference: {host_cpu_count()} CPU(s) visible")
+        hint(f"Host reference: {host_total_memory()} RAM visible")
+        hint(f"Host reference: {host_available_disk(str(state['host_path']))} free at mount path")
         resource_step = 0
         while resource_step < 3:
             if resource_step == 0:
@@ -1522,78 +1503,21 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             state["storage"] = normalize_binary_quantity(storage, "Ephemeral storage limit")
             resource_step += 1
 
-    def step_agent() -> None:
-        options = ["OpenAI Codex", "Claude Code", "None"]
-        current = "None"
-        if str(state["agent_cmd"]) == "codex":
-            current = "OpenAI Codex"
-        elif str(state["agent_cmd"]) == "claude":
-            current = "Claude Code"
-        picked = choose("AI coding agent to install in the container", options, default_idx=options.index(current) + 1)
-        if picked.startswith("OpenAI Codex"):
-            agent_cmd = "codex"
-        elif picked.startswith("Claude Code"):
-            agent_cmd = "claude"
-        else:
-            agent_cmd = ""
-        state["agent"] = picked
-        state["agent_cmd"] = agent_cmd
-        state["agent_args"] = ""
-        state["agent_secret_name"] = ""
-        state["agent_secret_key"] = ""
-        state["agent_secret_mount_path"] = ""
-        state["agent_secret_content"] = ""
-        secret_env_vars = [item for item in list(state["secret_env_vars"]) if item.name not in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
-        if agent_cmd:
-            permissive_default = str(state["permissive_mode"]) == "true"
-            state["permissive_mode"] = "true" if (confirm_yes("Enable permissive mode for the agent container?") if permissive_default else confirm("Enable permissive mode for the agent container?")) else "false"
-            state["agent_args"] = resolve_agent_args(agent_cmd, str(state["permissive_mode"]))
-            state["agent_secret_name"], state["agent_secret_key"], state["agent_secret_mount_path"], state["agent_secret_content"] = gather_agent_auth(agent_cmd, str(state["project_name"]))
-            if agent_cmd == "codex":
-                auth_path = Path.home() / ".codex" / "auth.json"
-                if auth_path.exists():
-                    try:
-                        auth = json.loads(auth_path.read_text())
-                        derived_key = auth.get("OPENAI_API_KEY") or ""
-                    except json.JSONDecodeError:
-                        derived_key = ""
-                    if derived_key:
-                        ok("Derived OPENAI_API_KEY from host auth")
-                        secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", derived_key))
-                    elif not str(state["agent_secret_content"]):
-                        warn("Could not auto-read credential from host")
-                        manual = prompt("OPENAI_API_KEY (paste manually, or leave blank to skip)")
-                        if manual:
-                            secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", manual))
-            if agent_cmd == "claude" and not str(state["agent_secret_content"]):
-                warn("Could not auto-read Claude Code auth file from host")
-                manual = prompt("ANTHROPIC_API_KEY (paste manually, or leave blank to skip)")
-                if manual:
-                    secret_env_vars.append(SecretEnvVar("ANTHROPIC_API_KEY", manual))
-        else:
-            state["permissive_mode"] = ""
-        state["secret_env_vars"] = secret_env_vars
-
     def step_environment() -> None:
         while True:
             plain_items = ", ".join(f"{item.name}={item.value}" for item in list(state["plain_env_vars"])) or "none"
-            secret_items = ", ".join(item.name for item in list(state["secret_env_vars"])) or "none"
             hint(f"Plain env vars: {plain_items}")
-            hint(f"Secret env vars: {secret_items}")
             action = choose(
                 "Environment variables",
                 [
                     "done",
                     "add plain env var",
                     "remove plain env var",
-                    "add secret env var",
-                    "remove secret env var",
                     "clear all env vars",
                 ],
                 default_idx=1,
             )
             plain_env_vars = list(state["plain_env_vars"])
-            secret_env_vars = list(state["secret_env_vars"])
             if action == "done":
                 return
             if action == "add plain env var":
@@ -1604,19 +1528,9 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
                     continue
                 picked = choose("Remove which plain env var?", [f"{item.name}={item.value}" for item in plain_env_vars])
                 plain_env_vars.pop([f"{item.name}={item.value}" for item in plain_env_vars].index(picked))
-            elif action == "add secret env var":
-                secret_env_vars.append(SecretEnvVar(prompt("Variable name"), prompt("Value")))
-            elif action == "remove secret env var":
-                if not secret_env_vars:
-                    warn("No secret env vars to remove")
-                    continue
-                picked = choose("Remove which secret env var?", [item.name for item in secret_env_vars])
-                secret_env_vars.pop([item.name for item in secret_env_vars].index(picked))
             elif action == "clear all env vars":
                 plain_env_vars = []
-                secret_env_vars = [item for item in secret_env_vars if item.name in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
             state["plain_env_vars"] = plain_env_vars
-            state["secret_env_vars"] = secret_env_vars
 
     def step_network() -> None:
         default_expose = bool(state["expose_service"])
@@ -1633,9 +1547,8 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         ("Project", step_project),
         ("Runtime", step_runtime),
         ("Base image", step_base_image),
-        ("Toolchain packages", step_toolchains),
+        ("Extra packages", step_packages),
         ("Resource limits", step_resources),
-        ("AI Agent", step_agent),
         ("Environment variables", step_environment),
         ("Network", step_network),
     ]
@@ -1654,18 +1567,9 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             else:
                 index -= 1
 
-    toolchain_words: list[str] = []
-    for item in list(state["toolchains"]):
-        toolchain_words.extend(item.split())
     extra_words = str(state["extra_packages"]).split()
-    if state["agent_cmd"] and "nodejs" not in toolchain_words:
-        toolchain_words.extend(["nodejs", "npm"])
-    if state["agent_cmd"] == "codex" and "bubblewrap" not in extra_words:
-        extra_words.append("bubblewrap")
-    install_rustup = "rustup" in toolchain_words
-    if install_rustup:
-        toolchain_words = [word for word in toolchain_words if word != "rustup"]
-    all_packages = sort_unique_words((baseline_packages() + " " + " ".join(toolchain_words + extra_words)).split())
+    state["auth_files"] = gather_agent_auth_files(str(state["project_name"]))
+    all_packages = sort_unique_words((baseline_packages() + " " + " ".join(extra_words)).split())
 
     return AgentConfig(
         project_name=str(state["project_name"]),
@@ -1678,19 +1582,14 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         storage=str(state["storage"]),
         agent=str(state["agent"]),
         agent_cmd=str(state["agent_cmd"]),
-        permissive_mode=str(state["permissive_mode"]),
         agent_args=str(state["agent_args"]),
         all_packages=all_packages,
-        install_rustup=install_rustup,
+        install_rustup=True,
         plain_env_vars=list(state["plain_env_vars"]),
-        secret_env_vars=list(state["secret_env_vars"]),
+        auth_files=list(state["auth_files"]),
         expose_service=bool(state["expose_service"]),
         container_port=str(state["container_port"]),
         node_port=str(state["node_port"]),
-        agent_secret_name=str(state["agent_secret_name"]),
-        agent_secret_key=str(state["agent_secret_key"]),
-        agent_secret_mount_path=str(state["agent_secret_mount_path"]),
-        agent_secret_content=str(state["agent_secret_content"]),
     )
 
 
@@ -1712,10 +1611,9 @@ def print_summary(cfg: AgentConfig) -> None:
     print(f"  Resources {BOLD}{cfg.cpu} CPU · {cfg.memory} RAM · {cfg.storage} storage{RESET}")
     print(f"  Mount     {BOLD}{cfg.host_path}{RESET} → {cfg.mount_path}")
     if cfg.agent_cmd:
-        print(f"  Agent     {BOLD}{cfg.agent_cmd} {cfg.agent_args}{RESET}")
-        print(f"  Permissive {BOLD}{cfg.permissive_mode or 'false'}{RESET}")
+        print(f"  Agent     {BOLD}codex, claude{RESET}")
         print(f"  Daemon    {BOLD}paseo{RESET}")
-        print(f"  Command   {BOLD}{cfg.agent_cmd}{RESET}")
+        print(f"  Auth      {BOLD}{len(cfg.auth_files)} file(s) copied{RESET}")
     print(f"  {DIM}───────────────────────────────────────{RESET}")
     print()
 
@@ -1760,6 +1658,10 @@ def main(argv: list[str]) -> int:
     except AgentError as exc:
         print(f"{YELLOW}✖{RESET}  {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        stop_log_stream()
+        print(f"\n{YELLOW}✖{RESET}  Configuration cancelled.", file=sys.stderr)
+        return 130
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         stdout = (exc.stdout or "").strip()

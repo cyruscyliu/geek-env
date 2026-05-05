@@ -29,8 +29,8 @@ if ! kubectl get runtimeclass kata-qemu >/dev/null 2>&1; then
   exit 0
 fi
 
-if [[ ! -f "$HOME/.codex/auth.json" && -z "${OPENAI_API_KEY:-}" ]]; then
-  log "Skipping: neither ~/.codex/auth.json nor OPENAI_API_KEY is available for Codex"
+if [[ ! -f "$HOME/.codex/auth.json" ]]; then
+  log "Skipping: ~/.codex/auth.json is not available for Codex"
   exit 0
 fi
 
@@ -40,28 +40,24 @@ import json
 import os
 from pathlib import Path
 
-from scripts.agentctl import AgentConfig, SecretEnvVar, agent_label_for_cmd, resolve_agent_args, write_project_files
+from scripts.agentctl import AgentAuthFile, AgentConfig, agent_label_for_cmd, write_project_files
 
 project = "${PROJECT}"
 work_dir = Path("${WORK_DIR}")
+container_home = f"/home/{project}"
 auth_path = Path.home() / ".codex" / "auth.json"
-auth_name = ""
-auth_key = ""
-auth_mount_path = ""
-auth_content = ""
-secret_env_vars = []
+auth_files = []
 
 if auth_path.exists():
     data = json.loads(auth_path.read_text())
     if data.get("auth_mode") == "chatgpt":
-        auth_name = f"{project}-codex-auth"
-        auth_key = "auth.json"
-        auth_mount_path = "/home/agent/.codex/auth.json"
-        auth_content = auth_path.read_text()
-
-api_key = os.environ.get("OPENAI_API_KEY", "")
-if api_key:
-    secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", api_key))
+        auth_files.append(
+            AgentAuthFile(
+                key="codex-auth.json",
+                mount_path=f"{container_home}/.codex/auth.json",
+                content=auth_path.read_text(),
+            )
+        )
 
 cfg = AgentConfig(
     project_name=project,
@@ -72,18 +68,13 @@ cfg = AgentConfig(
     cpu="1",
     memory="2Gi",
     storage="10Gi",
-    agent=agent_label_for_cmd("codex"),
-    agent_cmd="codex",
-    permissive_mode="true",
-    agent_args=resolve_agent_args("codex", "true"),
+    agent=agent_label_for_cmd("multi"),
+    agent_cmd="multi",
+    agent_args="",
     persist_state=False,
     all_packages="sudo ca-certificates curl wget git jq python3 python3-pip ripgrep fd-find bat nodejs npm bubblewrap",
     bootstrap_profile="full",
-    secret_env_vars=secret_env_vars,
-    agent_secret_name=auth_name,
-    agent_secret_key=auth_key,
-    agent_secret_mount_path=auth_mount_path,
-    agent_secret_content=auth_content,
+    auth_files=auth_files,
 )
 work_dir.mkdir(parents=True, exist_ok=True)
 write_project_files(cfg)
@@ -105,27 +96,27 @@ log "Checking agent tooling"
 kubectl -n "$PROJECT" exec "$POD" -- sh -lc 'command -v paseo >/dev/null && command -v codex >/dev/null'
 
 log "Checking Paseo daemon status"
-kubectl -n "$PROJECT" exec "$POD" -- su - agent -c 'cd /workspace && PASEO_HOME=/home/agent/.paseo paseo daemon status'
+kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo daemon status"
 
 log "Launching a detached Codex task through Paseo"
 AGENT_ID="$(
-  kubectl -n "$PROJECT" exec "$POD" -- su - agent -c \
-    "cd /workspace && PASEO_HOME=/home/agent/.paseo paseo run --provider codex --detach -q 'Reply with exactly SMOKE_OK and then stop.'" \
+  kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
+    "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo run --provider codex --detach -q 'Reply with exactly SMOKE_OK and then stop.'" \
     | tr -d '\r' | tail -n1
 )"
 test -n "$AGENT_ID"
 
 log "Waiting for Paseo-managed agent $AGENT_ID"
-kubectl -n "$PROJECT" exec "$POD" -- su - agent -c \
-  "cd /workspace && PASEO_HOME=/home/agent/.paseo paseo wait '$AGENT_ID' --timeout 300"
+kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
+  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo wait '$AGENT_ID' --timeout 300"
 
 log "Checking Paseo agent listing"
-kubectl -n "$PROJECT" exec "$POD" -- su - agent -c \
-  "cd /workspace && PASEO_HOME=/home/agent/.paseo paseo ls -a -q | grep -Fx '$AGENT_ID'"
+kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
+  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo ls -a -q | grep -Fx '$AGENT_ID'"
 
 log "Checking Paseo agent logs"
-kubectl -n "$PROJECT" exec "$POD" -- su - agent -c \
-  "cd /workspace && PASEO_HOME=/home/agent/.paseo paseo logs '$AGENT_ID' --tail 200" \
+kubectl -n "$PROJECT" exec "$POD" -- su - "$PROJECT" -c \
+  "cd /workspace && PASEO_HOME=/home/$PROJECT/.paseo paseo logs '$AGENT_ID' --tail 200" \
   | tee "$WORK_DIR/paseo-agent.log"
 
 grep -q "SMOKE_OK" "$WORK_DIR/paseo-agent.log"
