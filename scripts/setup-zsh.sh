@@ -147,7 +147,7 @@ fi
 alias vim='nvim'
 
 if [[ -o interactive ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
-  PROMPT='%n@%m:%~ %# '
+  PROMPT='%2~ %# '
   RPROMPT=''
 fi
 EOF
