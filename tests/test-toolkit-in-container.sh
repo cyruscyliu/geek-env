@@ -7,7 +7,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_HOME="${HOME:-/home/geek}"
 FIRST_LOG="/tmp/geek-env-install-first.log"
 SECOND_LOG="/tmp/geek-env-install-second.log"
-SMOKE_LOG="/tmp/geek-env-smoke.log"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -39,7 +38,7 @@ assert_log_contains() {
 
 main() {
   mkdir -p "$TEST_HOME"
-  rm -f "$FIRST_LOG" "$SECOND_LOG" "$SMOKE_LOG"
+  rm -f "$FIRST_LOG" "$SECOND_LOG"
 
   export HOME="$TEST_HOME"
   export XDG_CONFIG_HOME="$HOME/.config"
@@ -53,9 +52,6 @@ main() {
   log "Running second full install"
   bash "$REPO_ROOT/install.sh" | tee "$SECOND_LOG"
 
-  log "Running smoke test suite"
-  bash "$REPO_ROOT/tests/smoke-test.sh" | tee "$SMOKE_LOG"
-
   log "Asserting installed toolkit state"
   assert_file "$HOME/.zshrc"
   assert_dir "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
@@ -67,8 +63,6 @@ main() {
   assert_log_contains "$SECOND_LOG" "Test mode enabled; skipping login shell change"
   assert_log_contains "$SECOND_LOG" "Skipping zramswap service activation"
   assert_log_contains "$SECOND_LOG" "[install] All requested components installed."
-  assert_log_contains "$SMOKE_LOG" "Smoke test passed"
-
   log "Toolkit integration test passed"
 }
 

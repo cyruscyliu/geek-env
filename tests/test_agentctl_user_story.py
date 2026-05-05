@@ -13,6 +13,7 @@ from scripts.agentctl import (
     agent_label_for_cmd,
     build_paseo_bootstrap_line,
     is_valid_project_name,
+    sanitize_codex_config_toml,
     restore_files,
     snapshot_files,
     transition_public_state,
@@ -130,6 +131,23 @@ class UserStoryGraphTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertFalse(is_valid_project_name(name))
 
+    def test_sanitize_codex_config_removes_trusted_projects(self) -> None:
+        source = """model_provider = "openai"
+[projects."/home/debian/Projects/foo"]
+trust_level = "trusted"
+
+[projects."/tmp"]
+trust_level = "trusted"
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+"""
+        rendered = sanitize_codex_config_toml(source)
+        self.assertIn('model_provider = "openai"', rendered)
+        self.assertIn("[tui.model_availability_nux]", rendered)
+        self.assertNotIn('[projects."/home/debian/Projects/foo"]', rendered)
+        self.assertNotIn('trust_level = "trusted"', rendered)
+
     def test_agent_config_round_trip(self) -> None:
         cfg = self.make_agent_config(
             cpu="12",
@@ -231,7 +249,7 @@ class UserStoryGraphTest(unittest.TestCase):
 
     def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
         cfg = self.make_config(
-            host_path="/tmp/fight-cuttlefish-x64",
+            host_path="/tmp/sudo-passwordless",
             bootstrap_profile="minimal",
         )
 
@@ -253,7 +271,7 @@ class UserStoryGraphTest(unittest.TestCase):
 
     def test_full_bootstrap_does_not_include_shell_editor_mux_setup(self) -> None:
         cfg = self.make_agent_config(
-            host_path="/tmp/fight-cuttlefish-x64",
+            host_path="/tmp/sudo-passwordless",
             cpu="1",
             memory="2Gi",
             storage="10Gi",

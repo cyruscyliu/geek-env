@@ -417,6 +417,24 @@ def indent_block(text: str, spaces: int) -> str:
     return "\n".join(f"{prefix}{line}" if line else prefix.rstrip() for line in text.splitlines())
 
 
+def sanitize_codex_config_toml(text: str) -> str:
+    lines = text.splitlines()
+    sanitized: list[str] = []
+    skip_projects_block = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[projects."):
+            skip_projects_block = True
+            continue
+        if skip_projects_block and stripped.startswith("[") and stripped.endswith("]"):
+            skip_projects_block = False
+        if skip_projects_block:
+            continue
+        sanitized.append(line)
+    result = "\n".join(sanitized).strip()
+    return f"{result}\n" if result else ""
+
+
 @dataclass
 class PlainEnvVar:
     name: str
@@ -1326,18 +1344,29 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
 
     codex_auth_path = Path.home() / ".codex" / "auth.json"
     if codex_auth_path.exists():
-        data = json.loads(codex_auth_path.read_text())
-        if data.get("auth_mode") == "chatgpt":
-            ok(f"Read Codex OAuth credentials from {codex_auth_path}")
-            auth_files.append(
-                AgentAuthFile(
-                    key="codex-auth.json",
-                    mount_path=f"{container_home}/.codex/auth.json",
-                    content=codex_auth_path.read_text(),
-                )
+        ok(f"Read Codex auth file from {codex_auth_path}")
+        auth_files.append(
+            AgentAuthFile(
+                key="codex-auth.json",
+                mount_path=f"{container_home}/.codex/auth.json",
+                content=codex_auth_path.read_text(),
             )
+        )
     else:
         hint("No existing Codex auth file found on this host.")
+
+    codex_config_path = Path.home() / ".codex" / "config.toml"
+    if codex_config_path.exists():
+        ok(f"Read Codex config file from {codex_config_path}")
+        auth_files.append(
+            AgentAuthFile(
+                key="codex-config.toml",
+                mount_path=f"{container_home}/.codex/config.toml",
+                content=sanitize_codex_config_toml(codex_config_path.read_text()),
+            )
+        )
+    else:
+        hint("No existing Codex config file found on this host.")
 
     claude_auth_path = find_first_existing(
         [

@@ -168,7 +168,6 @@ and Kata-backed pod lifecycle behavior:
 
 ```bash
 python3 -m unittest tests/test_agentctl_k3s_integration.py
-./tests/smoke-agentctl.sh
 ./tests/smoke-agentctl-paseo.sh
 ```
 
