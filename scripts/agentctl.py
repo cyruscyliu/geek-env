@@ -438,8 +438,6 @@ class AgentAuthFile:
 @dataclass
 class AgentConfig:
     project_name: str
-    host_path: str
-    mount_path: str
     runtime_class: str
     base_image: str
     cpu: str
@@ -479,17 +477,9 @@ class AgentConfig:
     def container_home(self) -> str:
         return "/root" if self.container_user == "root" else f"/home/{self.container_user}"
 
-    @property
-    def agent_state_host_path(self) -> str:
-        return f"{self.host_path.rstrip('/')}/.agent-state"
-
     def to_config_dict(self) -> dict:
         return {
             "project": self.project_name,
-            "workspace": {
-                "host_path": self.host_path,
-                "mount_path": self.mount_path,
-            },
             "runtime": {
                 "class": self.runtime_class,
                 "base_image": self.base_image,
@@ -536,7 +526,6 @@ class AgentConfig:
 
     @classmethod
     def from_config_dict(cls, data: dict) -> "AgentConfig":
-        workspace = data.get("workspace", {}) or {}
         runtime = data.get("runtime", {}) or {}
         resources = data.get("resources", {}) or {}
         agent = data.get("agent", {}) or {}
@@ -571,8 +560,6 @@ class AgentConfig:
                 ]
         return cls(
             project_name=data["project"],
-            host_path=workspace.get("host_path", ""),
-            mount_path=workspace.get("mount_path", f"/home/{data['project']}"),
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
             runtime_user=str(runtime.get("user") or ""),
@@ -711,16 +698,8 @@ class AgentConfig:
             f'            ephemeral-storage: "{self.storage}"',
             "        volumeMounts:",
             "        - name: project",
-            f"          mountPath: {self.mount_path}",
+            f"          mountPath: {self.container_home}",
         ]
-        if self.persist_state and self.mount_path != self.container_home:
-            deployment_lines.extend(
-                [
-                    "        - name: codex-home",
-                    f"          mountPath: {self.container_home}/.codex",
-                    "          subPath: .codex",
-                ]
-            )
         if self.agent_cmd:
             deployment_lines.extend(
                 [
@@ -1336,8 +1315,6 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
     extra_defaults = derive_extra_package_defaults(initial)
     state: dict[str, object] = {
         "project_name": initial.project_name if initial else "",
-        "host_path": initial.host_path if initial else "",
-        "mount_path": initial.mount_path if initial else "",
         "runtime_class": initial.runtime_class if initial else "kata-qemu",
         "base_image": initial.base_image if initial else "debian:trixie-slim",
         "runtime_user": initial.runtime_user if initial else "",
@@ -1371,17 +1348,6 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             warn("Name must start with a lowercase letter, use only lowercase letters, numbers, or hyphens, end with a letter or number, and stay within 32 characters for user/group compatibility")
             project_name = prompt("Project name", project_name)
         state["project_name"] = project_name
-        default_home = os.path.expanduser(f"~{os.environ.get('SUDO_USER') or os.environ.get('USER')}")
-        default_host_path = str(state["host_path"]) or os.path.join(default_home, project_name)
-        host_path = prompt_path("Host path to mount", default_host_path)
-        if not Path(host_path).exists():
-            warn(f"Directory does not exist: {host_path}")
-            if confirm("Create it?"):
-                Path(host_path).mkdir(parents=True, exist_ok=True)
-                ok(f"Created {host_path}")
-        state["host_path"] = host_path
-        default_mount_path = str(state["mount_path"]) or f"/home/{project_name}"
-        state["mount_path"] = prompt_path("Mount path inside container", default_mount_path)
 
     def step_runtime() -> None:
         runtime_options = [
@@ -1414,7 +1380,6 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         hint("Memory and storage values use Kubernetes binary units. Bare numbers default to Gi.")
         hint(f"Host reference: {host_cpu_count()} CPU(s) visible")
         hint(f"Host reference: {host_total_memory()} RAM visible")
-        hint(f"Host reference: {host_available_disk(str(state['host_path']))} free at mount path")
         resource_step = 0
         while resource_step < 3:
             if resource_step == 0:
@@ -1537,8 +1502,6 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
 
     return AgentConfig(
         project_name=str(state["project_name"]),
-        host_path=str(state["host_path"]),
-        mount_path=str(state["mount_path"]),
         runtime_class=str(state["runtime_class"]),
         base_image=str(state["base_image"]),
         runtime_user=str(state["runtime_user"]),
@@ -1574,7 +1537,6 @@ def print_summary(cfg: AgentConfig) -> None:
     print(f"  Runtime   {BOLD}{cfg.runtime_class}{RESET}")
     print(f"  Image     {BOLD}{cfg.base_image}{RESET}")
     print(f"  Resources {BOLD}{cfg.cpu} CPU · {cfg.memory} RAM · {cfg.storage} storage{RESET}")
-    print(f"  Mount     {BOLD}{cfg.host_path}{RESET} → {cfg.mount_path}")
     if cfg.agent_cmd:
         print(f"  Agent     {BOLD}codex, claude{RESET}")
         print(f"  Daemon    {BOLD}paseo{RESET}")

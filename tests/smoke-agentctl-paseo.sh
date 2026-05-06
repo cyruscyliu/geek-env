@@ -60,8 +60,6 @@ if auth_path.exists():
 
 cfg = AgentConfig(
     project_name=project,
-    host_path=str(work_dir),
-    mount_path="/workspace",
     runtime_class="kata-qemu",
     base_image="debian:trixie-slim",
     cpu="2",

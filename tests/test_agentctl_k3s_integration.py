@@ -30,9 +30,6 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory(prefix="agentctl-k3s-")
         self.addCleanup(self.tempdir.cleanup)
 
-        self.workspace = Path(self.tempdir.name) / "workspace"
-        self.workspace.mkdir(parents=True, exist_ok=True)
-
         self.original_output_dir = agentctl.OUTPUT_DIR
         self.output_dir = Path(self.tempdir.name) / "agents"
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -60,8 +57,6 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
     def make_config(self, **overrides: object) -> AgentConfig:
         defaults: dict[str, object] = {
             "project_name": self.project_name,
-            "host_path": str(self.workspace),
-            "mount_path": "/workspace",
             "runtime_class": "kata-qemu",
             "base_image": "debian:trixie-slim",
             "cpu": "1",

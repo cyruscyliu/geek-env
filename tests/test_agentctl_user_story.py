@@ -24,14 +24,10 @@ from scripts.agentctl import (
 
 class UserStoryGraphTest(unittest.TestCase):
     PROJECT = "fight-cuttlefish-x64"
-    WORKSPACE = f"/home/debian/Projects/{PROJECT}"
-    MOUNT_PATH = f"/home/{PROJECT}"
 
     def make_config(self, **overrides: Any) -> AgentConfig:
         defaults: dict[str, Any] = {
             "project_name": self.PROJECT,
-            "host_path": self.WORKSPACE,
-            "mount_path": self.MOUNT_PATH,
             "runtime_class": "kata-qemu",
             "base_image": "debian:trixie-slim",
             "cpu": "2",
@@ -127,8 +123,6 @@ trust_level = "trusted"
 
         for field_name in (
             "project_name",
-            "host_path",
-            "mount_path",
             "runtime_class",
             "base_image",
             "cpu",
@@ -184,19 +178,6 @@ trust_level = "trusted"
         self.assertIn("subPath: .paseo", rendered)
         self.assertNotIn("hostPath:", rendered)
 
-    def test_persisted_codex_state_mounts_project_subpath_when_workspace_differs(self) -> None:
-        cfg = self.make_agent_config(
-            persist_state=True,
-            mount_path="/workspace",
-        )
-
-        rendered = cfg.yaml_text()
-
-        self.assertIn("        - name: codex-home", rendered)
-        self.assertIn(f"mountPath: /home/{self.PROJECT}/.codex", rendered)
-        self.assertIn("subPath: .codex", rendered)
-        self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
-
     def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
         cfg = self.make_agent_config(
             plain_env_vars=[PlainEnvVar("FOO", "bar")],
@@ -213,10 +194,6 @@ trust_level = "trusted"
         loaded = AgentConfig.from_config_dict(
             {
                 "project": self.PROJECT,
-                "workspace": {
-                    "host_path": self.WORKSPACE,
-                    "mount_path": self.MOUNT_PATH,
-                },
                 "runtime": {
                     "class": "kata-qemu",
                     "base_image": "debian:trixie-slim",
@@ -315,7 +292,6 @@ trust_level = "trusted"
 
     def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
         cfg = self.make_config(
-            host_path="/tmp/sudo-passwordless",
             bootstrap_profile="minimal",
         )
 
@@ -337,7 +313,6 @@ trust_level = "trusted"
 
     def test_full_bootstrap_does_not_include_shell_editor_mux_setup(self) -> None:
         cfg = self.make_agent_config(
-            host_path="/tmp/sudo-passwordless",
             cpu="1",
             memory="2Gi",
             storage="10Gi",
