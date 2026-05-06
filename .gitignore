@@ -8,6 +8,7 @@ config/nvim/lazy-lock.json
 .DS_Store
 .idea/
 .vscode/
+nohup.out
 
 # Python caches
 __pycache__/
