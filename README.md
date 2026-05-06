@@ -10,6 +10,7 @@ each guest.
 ![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
 ![Agent](https://img.shields.io/badge/agent-Codex-0a7ea4)
 ![Agent](https://img.shields.io/badge/agent-Claude%20Code-d97706)
+![UI](https://img.shields.io/badge/ui-Headlamp-2563eb)
 ![Manager](https://img.shields.io/badge/manager-Paseo-15803d)
 ![License](https://img.shields.io/badge/license-MIT-black)
 
@@ -20,12 +21,6 @@ grep -c vmx /proc/cpuinfo
 sudo bash scripts/setup-k3s-kata.sh
 pyhton3 -m pip install -r requirements.txt
 python3 scripts/agentctl.py
-```
-
-Apply the generated manifest when ready:
-
-```bash
-kubectl apply -f agents/<project>.yaml
 ```
 
 For tool-specific usage details, see:
@@ -53,4 +48,4 @@ docs under the README files in the repo root.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+[`MIT LICENSE`](LICENSE).

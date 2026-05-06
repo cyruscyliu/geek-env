@@ -10,6 +10,7 @@ from scripts.agentctl import (
     AgentConfig,
     AgentAuthFile,
     PlainEnvVar,
+    apply_saved_project,
     agent_label_for_cmd,
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
@@ -307,6 +308,19 @@ trust_level = "trusted"
         for legacy_marker in ("setup-zsh.sh", "setup-nvim.sh", "setup-tmux.sh", "usermod -s"):
             with self.subTest(marker=legacy_marker):
                 self.assertNotIn(legacy_marker, rendered)
+
+    def test_apply_saved_project_waits_for_rollout_when_template_changes(self) -> None:
+        cfg = self.make_agent_config()
+
+        with (
+            patch("scripts.agentctl.load_project_config", return_value=cfg),
+            patch("scripts.agentctl.apply_project_manifest"),
+            patch("scripts.agentctl.get_deployment_generation", side_effect=["1", "1", "2", "2"]),
+            patch("scripts.agentctl.wait_for_deployment_ready", return_value="pod/morpheus-new") as wait_ready,
+        ):
+            apply_saved_project(self.PROJECT)
+
+        wait_ready.assert_called_once_with(self.PROJECT)
 
 
 if __name__ == "__main__":

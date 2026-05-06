@@ -1548,16 +1548,39 @@ def print_summary(cfg: AgentConfig) -> None:
     print()
 
 
+def apply_saved_project(project_name: str) -> None:
+    cfg = load_project_config(project_name)
+    generation_before = get_deployment_generation(project_name)
+    observed_before = get_deployment_generation(project_name, observed=True)
+    apply_project_manifest(cfg)
+    generation_after = get_deployment_generation(project_name)
+    observed_after = get_deployment_generation(project_name, observed=True)
+    if generation_after and generation_after != generation_before:
+        ok("Pod template changed; waiting for rollout to finish...")
+        if observed_after != generation_after:
+            hint(f"Deployment generation: {generation_before or 'unknown'} -> {generation_after}")
+        pod = wait_for_deployment_ready(project_name)
+        ok(f"{pod} is ready.")
+        return
+    ok("No pod-template change detected; apply completed.")
+    if observed_after and observed_after != observed_before:
+        hint(f"Deployment controller observed generation {observed_after}.")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Generate k3s Kata agent project config and manifests.")
-    parser.parse_args(argv)
+    parser.add_argument("project", nargs="?", help="Apply a saved project config")
+    args = parser.parse_args(argv)
 
     try:
-        cfg = build_config_interactively()
-        write_project_files(cfg)
-        print_summary(cfg)
-        print("Apply manually when ready:")
-        print(f"  kubectl apply -f {cfg.yaml_path}")
+        if args.project:
+            apply_saved_project(args.project)
+        else:
+            cfg = build_config_interactively()
+            write_project_files(cfg)
+            print_summary(cfg)
+            print("Apply manually when ready:")
+            print(f"  kubectl apply -f {cfg.yaml_path}")
         return 0
     except AgentError as exc:
         print(f"{YELLOW}✖{RESET}  {exc}", file=sys.stderr)

@@ -89,10 +89,17 @@ Resources:
 
 ### Access
 
-Start a port-forward on all interfaces:
+`kubectl port-forward` is a foreground process, not a daemon. For a one-off
+session, run:
 
 ```bash
 kubectl -n kube-system port-forward --address 0.0.0.0 svc/headlamp 8081:80
+```
+
+To leave it running after closing the shell, use:
+
+```bash
+nohup kubectl -n kube-system port-forward --address 0.0.0.0 svc/headlamp 8081:80 >/tmp/headlamp-port-forward.log 2>&1 &
 ```
 
 Open:
@@ -119,7 +126,8 @@ kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/headlamp/mai
 
 ## `scripts/agentctl.py`
 
-Generate AI-native vault project config and manifests.
+Generate AI-native vault project config and manifests, and re-apply saved
+projects.
 
 ### Create
 
@@ -173,16 +181,15 @@ agents/
   <project>.yaml
 ```
 
-## Troubleshooting
-
-Apply the generated manifest manually when you are ready:
+### Apply A Saved Project
 
 ```bash
-kubectl apply -f agents/<project>.yaml
+python3 scripts/agentctl.py <project>
 ```
 
-Use Headlamp for deployment inspection, restarts, deletion, and general pod
-operations.
+This reloads `agents/<project>.agent.yaml`, re-renders `agents/<project>.yaml`,
+applies it with `kubectl`, and waits for readiness when the pod template
+changes.
 
 ## `scripts/refresh-k3s-network.sh`
 
