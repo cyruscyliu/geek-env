@@ -9,17 +9,14 @@ from unittest.mock import patch
 from scripts.agentctl import (
     AgentConfig,
     AgentAuthFile,
-    InvalidTransitionError,
     PlainEnvVar,
     agent_label_for_cmd,
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
     is_valid_project_name,
-    manage_project,
     sanitize_codex_config_toml,
     restore_files,
     snapshot_files,
-    transition_public_state,
 )
 
 
@@ -60,42 +57,6 @@ class UserStoryGraphTest(unittest.TestCase):
             agent_cmd="multi",
             **overrides,
         )
-
-    def test_config_edges(self) -> None:
-        for state in ("none", "saved", "ready", "failed"):
-            with self.subTest(state=state):
-                self.assertEqual(transition_public_state(state, "config"), "saved")
-
-    def test_apply_edges(self) -> None:
-        for state in ("saved", "ready", "failed"):
-            with self.subTest(state=state):
-                self.assertEqual(transition_public_state(state, "apply"), "starting")
-
-    def test_system_edges(self) -> None:
-        self.assertEqual(transition_public_state("starting", event="pod_ready"), "ready")
-        self.assertEqual(transition_public_state("starting", event="failure"), "failed")
-
-    def test_rejects_invalid_user_edges(self) -> None:
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("none", "apply")
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("ready", "status")  # type: ignore[arg-type]
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("ready", "delete")  # type: ignore[arg-type]
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("ready", "exec")  # type: ignore[arg-type]
-
-    def test_rejects_invalid_system_edges(self) -> None:
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("ready", event="pod_ready")
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("failed", event="failure")
-
-    def test_requires_exactly_one_transition_input(self) -> None:
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("saved")
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("starting", "apply", event="failure")
 
     def test_file_snapshot_restore_rolls_back_new_and_existing_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -346,24 +307,6 @@ trust_level = "trusted"
         for legacy_marker in ("setup-zsh.sh", "setup-nvim.sh", "setup-tmux.sh", "usermod -s"):
             with self.subTest(marker=legacy_marker):
                 self.assertNotIn(legacy_marker, rendered)
-
-    def test_manage_project_update_waits_but_does_not_attach(self) -> None:
-        cfg = self.make_agent_config()
-
-        with (
-            patch("scripts.agentctl.load_project_config", return_value=cfg),
-            patch("scripts.agentctl.kubectl") as kubectl,
-            patch("scripts.agentctl.choose", return_value="update"),
-            patch("scripts.agentctl.get_deployment_generation", side_effect=["1", "1", "2", "2"]),
-            patch("scripts.agentctl.apply_project_manifest"),
-            patch("scripts.agentctl.wait_for_deployment_ready", return_value="pod/morpheus-new"),
-            patch("scripts.agentctl.attach_to_project_pod") as attach,
-            patch("scripts.agentctl.os.system"),
-        ):
-            kubectl.return_value.returncode = 0
-            manage_project(self.PROJECT)
-
-        attach.assert_not_called()
 
 
 if __name__ == "__main__":

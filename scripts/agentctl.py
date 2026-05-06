@@ -40,16 +40,7 @@ RESET = "\033[0m"
 
 LOG_STREAM_PROCESS: subprocess.Popen[str] | None = None
 
-PublicState = Literal["none", "saved", "starting", "ready", "failed"]
-UserAction = Literal["config", "apply"]
-SystemEvent = Literal["pod_ready", "failure"]
-
-
 class AgentError(RuntimeError):
-    pass
-
-
-class InvalidTransitionError(AgentError):
     pass
 
 
@@ -62,40 +53,6 @@ class FileSnapshot:
     path: Path
     existed: bool
     content: str = ""
-
-
-def transition_public_state(
-    current: PublicState,
-    action: UserAction | None = None,
-    *,
-    event: SystemEvent | None = None,
-) -> PublicState:
-    if (action is None) == (event is None):
-        raise InvalidTransitionError("Provide exactly one of action or event")
-
-    if action is not None:
-        transitions: dict[tuple[PublicState, UserAction], PublicState] = {
-            ("none", "config"): "saved",
-            ("saved", "config"): "saved",
-            ("saved", "apply"): "starting",
-            ("ready", "config"): "saved",
-            ("ready", "apply"): "starting",
-            ("failed", "config"): "saved",
-            ("failed", "apply"): "starting",
-        }
-        try:
-            return transitions[(current, action)]
-        except KeyError as exc:
-            raise InvalidTransitionError(f"Invalid user transition: {current} --{action}--> ?") from exc
-
-    transitions = {
-        ("starting", "pod_ready"): "ready",
-        ("starting", "failure"): "failed",
-    }
-    try:
-        return transitions[(current, event or "")]
-    except KeyError as exc:
-        raise InvalidTransitionError(f"Invalid system transition: {current} --{event}--> ?") from exc
 
 
 def header(message: str) -> None:
@@ -1276,48 +1233,6 @@ def apply_project_manifest(cfg: AgentConfig) -> None:
     kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False, namespace=None)
 
 
-def manage_project(project_name: str) -> None:
-    cfg = load_project_config(project_name)
-
-    exists = kubectl(["get", "deployment", project_name], namespace=project_name, check=False)
-    if exists.returncode != 0:
-        warn(f"No deployment found for '{project_name}'")
-        sys.exit(1)
-
-    os.system("clear")
-    print(f"{BOLD}{CYAN}")
-    print("  ╔═══════════════════════════════════════╗")
-    print(f"  ║ {'Manage Agent: ' + project_name:<37} ║")
-    print("  ╚═══════════════════════════════════════╝")
-    print(f"{RESET}")
-
-    action = choose(
-            "Action",
-            [
-            "update  — render saved config and apply it",
-        ],
-    )
-
-    if action.startswith("update"):
-        generation_before = get_deployment_generation(project_name)
-        observed_before = get_deployment_generation(project_name, observed=True)
-        apply_project_manifest(cfg)
-        generation_after = get_deployment_generation(project_name)
-        observed_after = get_deployment_generation(project_name, observed=True)
-        if generation_after and generation_after != generation_before:
-            ok("Pod template changed; waiting for rollout to finish...")
-            if observed_after != generation_after:
-                hint(f"Deployment generation: {generation_before or 'unknown'} -> {generation_after}")
-            pod = wait_for_deployment_ready(project_name)
-        else:
-            ok("No pod-template change detected; reusing the current pod.")
-            if observed_after and observed_after != observed_before:
-                hint(f"Deployment controller observed generation {observed_after}.")
-            pod = get_project_pod(project_name, ready_only=True) or get_project_pod(project_name)
-        if pod:
-            ok(f"{pod} is ready.")
-        return
-
 def find_first_existing(paths: Iterable[Path]) -> Path | None:
     for path in paths:
         if path.exists():
@@ -1633,42 +1548,16 @@ def print_summary(cfg: AgentConfig) -> None:
     print()
 
 
-def deploy_new_project(cfg: AgentConfig) -> None:
-    if not command_exists("kubectl"):
-        warn("kubectl not found — skipping deploy. Apply manually:")
-        print(f"  kubectl apply -f {cfg.yaml_path}")
-        return
-    exists = kubectl(["get", "deployment", cfg.project_name], namespace=cfg.project_name, check=False)
-    if exists.returncode == 0:
-        warn(f"Deployment '{cfg.project_name}' already exists and will be restarted.")
-        if not confirm("Continue?"):
-            return
-    ok("Applying manifests...")
-    apply_project_manifest(cfg)
-    ok("Waiting for pod to start...")
-    pod = wait_for_pod_running(cfg.project_name)
-    ok(f"{pod} is running.")
-
-
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Generate and manage k3s Kata agent deployments.")
-    parser.add_argument("project", nargs="?", help="Manage an existing project")
-    args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(description="Generate k3s Kata agent project config and manifests.")
+    parser.parse_args(argv)
 
     try:
-        if args.project:
-            manage_project(args.project)
-        else:
-            cfg = build_config_interactively()
-            snapshots = snapshot_files([cfg.config_path, cfg.yaml_path])
-            write_project_files(cfg)
-            print_summary(cfg)
-            if confirm_yes("Deploy now?"):
-                try:
-                    deploy_new_project(cfg)
-                except Exception:
-                    rollback_created_project(cfg, snapshots)
-                    raise
+        cfg = build_config_interactively()
+        write_project_files(cfg)
+        print_summary(cfg)
+        print("Apply manually when ready:")
+        print(f"  kubectl apply -f {cfg.yaml_path}")
         return 0
     except AgentError as exc:
         print(f"{YELLOW}✖{RESET}  {exc}", file=sys.stderr)

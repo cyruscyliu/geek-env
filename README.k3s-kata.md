@@ -119,7 +119,7 @@ kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/headlamp/mai
 
 ## `scripts/agentctl.py`
 
-Generate and manage an AI-native vault.
+Generate AI-native vault project config and manifests.
 
 ### Create
 
@@ -173,55 +173,16 @@ agents/
   <project>.yaml
 ```
 
-### Manage
-
-```bash
-python3 scripts/agentctl.py <project>
-```
-
-Actions:
-
-- `update`
-
 ## Troubleshooting
 
-### Live validation
-
-Use the dedicated integration checks when you need to exercise real `kubectl`
-and Kata-backed pod lifecycle behavior:
+Apply the generated manifest manually when you are ready:
 
 ```bash
-python3 -m unittest tests/test_agentctl_k3s_integration.py
-./tests/smoke-agentctl-paseo.sh
+kubectl apply -f agents/<project>.yaml
 ```
 
-They skip cleanly when `kubectl` or the `kata-qemu` RuntimeClass is not
-available.
-
-Use Headlamp for deployment inspection, restarts, and deletion. The web UI is
-the default path for:
-
-- viewing pod and deployment status
-- reading logs and events
-- restarting workloads
-- deleting deployments, pods, services, PVCs, or namespaces
-
-### Re-apply a saved manifest
-
-```bash
-python3 scripts/agentctl.py <project>
-```
-
-Choose `update`.
-
-This reapplies the rendered `agents/<project>.yaml` from the saved
-`agents/<project>.agent.yaml` config. It only rolls a new pod if the rendered
-manifest changes the Deployment pod template. The manage flow reports whether
-it detected a rollout or is reusing the current pod, and reports the pod that
-is ready when the update completes.
-Before applying, it also checks the requested CPU, memory, and ephemeral
-storage against remaining requested headroom on ready schedulable nodes and
-fails early if nothing in the cluster can fit the pod.
+Use Headlamp for deployment inspection, restarts, deletion, and general pod
+operations.
 
 ## `scripts/refresh-k3s-network.sh`
 
