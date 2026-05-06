@@ -181,21 +181,7 @@ python3 scripts/agentctl.py <project>
 
 Actions:
 
-- `exec`
 - `update`
-
-### Attach behavior
-
-- waits for the container to start
-- streams logs during provisioning
-- waits for the project user, `paseo`, and the expected agent CLI
-- prints the current `paseo` pairing payload before attach when available
-- attaches in a shell as the project user
-- starts in the configured work directory
-- uses the project user's `~/.codex` inside the container
-- does not auto-run the coding agent on attach
-- installs Codex behind a `codex` wrapper so the normal command includes the saved args
-- installs Claude Code behind a `claude` wrapper so the normal command includes the saved args
 
 ## Troubleshooting
 

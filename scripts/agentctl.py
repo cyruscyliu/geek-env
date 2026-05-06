@@ -41,7 +41,7 @@ RESET = "\033[0m"
 LOG_STREAM_PROCESS: subprocess.Popen[str] | None = None
 
 PublicState = Literal["none", "saved", "starting", "ready", "failed"]
-UserAction = Literal["config", "apply", "exec"]
+UserAction = Literal["config", "apply"]
 SystemEvent = Literal["pod_ready", "failure"]
 
 
@@ -80,7 +80,6 @@ def transition_public_state(
             ("saved", "apply"): "starting",
             ("ready", "config"): "saved",
             ("ready", "apply"): "starting",
-            ("ready", "exec"): "ready",
             ("failed", "config"): "saved",
             ("failed", "apply"): "starting",
         }
@@ -1279,8 +1278,6 @@ def apply_project_manifest(cfg: AgentConfig) -> None:
 
 def manage_project(project_name: str) -> None:
     cfg = load_project_config(project_name)
-    mount_path = cfg.mount_path or f"/home/{cfg.project_name}"
-    agent_cmd = cfg.agent_cmd
 
     exists = kubectl(["get", "deployment", project_name], namespace=project_name, check=False)
     if exists.returncode != 0:
@@ -1297,18 +1294,10 @@ def manage_project(project_name: str) -> None:
     action = choose(
             "Action",
             [
-            "exec    — attach agent shell",
             "update  — render saved config and apply it",
         ],
     )
 
-    if action.startswith("exec"):
-        pod = get_project_pod(project_name) or get_project_pod(project_name, ready_only=True)
-        if not pod:
-            print("No pod running.")
-            return
-        attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
-        return
     if action.startswith("update"):
         generation_before = get_deployment_generation(project_name)
         observed_before = get_deployment_generation(project_name, observed=True)
@@ -1658,7 +1647,7 @@ def deploy_new_project(cfg: AgentConfig) -> None:
     apply_project_manifest(cfg)
     ok("Waiting for pod to start...")
     pod = wait_for_pod_running(cfg.project_name)
-    attach_to_project_pod(cfg.project_name, pod, cfg.mount_path, cfg.agent_cmd)
+    ok(f"{pod} is running.")
 
 
 def main(argv: list[str]) -> int:

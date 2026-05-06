@@ -2,7 +2,6 @@
 
 import tempfile
 import unittest
-from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -16,7 +15,6 @@ from scripts.agentctl import (
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
     is_valid_project_name,
-    kubectl_exec_args_for_terminal,
     manage_project,
     sanitize_codex_config_toml,
     restore_files,
@@ -77,20 +75,15 @@ class UserStoryGraphTest(unittest.TestCase):
         self.assertEqual(transition_public_state("starting", event="pod_ready"), "ready")
         self.assertEqual(transition_public_state("starting", event="failure"), "failed")
 
-    def test_exec_edge(self) -> None:
-        self.assertEqual(transition_public_state("ready", "exec"), "ready")
-
     def test_rejects_invalid_user_edges(self) -> None:
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("none", "apply")
         with self.assertRaises(InvalidTransitionError):
-            transition_public_state("saved", "exec")
-        with self.assertRaises(InvalidTransitionError):
-            transition_public_state("starting", "exec")
-        with self.assertRaises(InvalidTransitionError):
             transition_public_state("ready", "status")  # type: ignore[arg-type]
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("ready", "delete")  # type: ignore[arg-type]
+        with self.assertRaises(InvalidTransitionError):
+            transition_public_state("ready", "exec")  # type: ignore[arg-type]
 
     def test_rejects_invalid_system_edges(self) -> None:
         with self.assertRaises(InvalidTransitionError):
@@ -102,7 +95,7 @@ class UserStoryGraphTest(unittest.TestCase):
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("saved")
         with self.assertRaises(InvalidTransitionError):
-            transition_public_state("starting", "exec", event="failure")
+            transition_public_state("starting", "apply", event="failure")
 
     def test_file_snapshot_restore_rolls_back_new_and_existing_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -354,16 +347,6 @@ trust_level = "trusted"
             with self.subTest(marker=legacy_marker):
                 self.assertNotIn(legacy_marker, rendered)
 
-    def test_kubectl_exec_uses_tty_only_when_terminal_is_available(self) -> None:
-        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):
-            self.assertEqual(kubectl_exec_args_for_terminal(), ["-it"])
-
-        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=False):
-            self.assertEqual(kubectl_exec_args_for_terminal(), ["-i"])
-
-        with patch("sys.stdin.isatty", return_value=False), patch("sys.stdout.isatty", return_value=False):
-            self.assertEqual(kubectl_exec_args_for_terminal(), [])
-
     def test_manage_project_update_waits_but_does_not_attach(self) -> None:
         cfg = self.make_agent_config()
 
@@ -381,34 +364,6 @@ trust_level = "trusted"
             manage_project(self.PROJECT)
 
         attach.assert_not_called()
-
-    def test_attach_does_not_reattach_after_shell_exit(self) -> None:
-        pod_json = {
-            "status": {
-                "containerStatuses": [
-                    {
-                        "state": {
-                            "running": {
-                                "startedAt": "2026-05-06T08:00:00Z",
-                            }
-                        }
-                    }
-                ]
-            }
-        }
-
-        with (
-            patch("scripts.agentctl.maybe_start_log_stream"),
-            patch("scripts.agentctl.stop_log_stream"),
-            patch("scripts.agentctl.kubectl_exec_args_for_terminal", return_value=["-it"]),
-            patch("scripts.agentctl.get_pod_json", side_effect=[pod_json, pod_json]),
-            patch("scripts.agentctl.subprocess.run", return_value=SimpleNamespace(returncode=127)) as run_exec,
-        ):
-            from scripts.agentctl import attach_to_project_pod
-
-            attach_to_project_pod(self.PROJECT, "pod/morpheus", self.MOUNT_PATH, "multi")
-
-        run_exec.assert_called_once()
 
 
 if __name__ == "__main__":
