@@ -69,7 +69,6 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
             "storage": "10Gi",
             "agent": "None",
             "agent_cmd": "",
-            "permissive_mode": "",
             "agent_args": "",
             "all_packages": "",
             "persist_state": False,
