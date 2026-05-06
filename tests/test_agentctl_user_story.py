@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from scripts.agentctl import (
     AgentConfig,
@@ -12,6 +13,7 @@ from scripts.agentctl import (
     PlainEnvVar,
     agent_label_for_cmd,
     build_paseo_bootstrap_line,
+    gather_agent_auth_files,
     is_valid_project_name,
     sanitize_codex_config_toml,
     restore_files,
@@ -193,15 +195,53 @@ trust_level = "trusted"
         self.assertEqual(loaded.auth_files[0].key, "codex-auth.json")
         self.assertTrue(loaded.expose_service)
 
-    def test_persisted_codex_state_uses_shared_home_directory(self) -> None:
+    def test_auth_files_are_copied_in_bootstrap_not_k8s_secret(self) -> None:
+        cfg = self.make_agent_config(
+            auth_files=[
+                AgentAuthFile(
+                    key="codex-auth.json",
+                    mount_path=f"/home/{self.PROJECT}/.codex/auth.json",
+                    content='{"auth_mode":"chatgpt"}',
+                ),
+                AgentAuthFile(
+                    key="claude-auth.json",
+                    mount_path=f"/home/{self.PROJECT}/.config/claude-code/auth.json",
+                    content='{"token":"abc"}',
+                ),
+            ]
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertNotIn("kind: Secret", rendered)
+        self.assertNotIn("secretName:", rendered)
+        self.assertNotIn("name: agent-auth", rendered)
+        self.assertIn("path.write_bytes(base64.b64decode", rendered)
+        self.assertIn(f"/home/{self.PROJECT}/.codex/auth.json", rendered)
+        self.assertIn(f"/home/{self.PROJECT}/.config/claude-code/auth.json", rendered)
+
+    def test_persisted_codex_state_uses_project_pvc_not_host_home(self) -> None:
         cfg = self.make_agent_config(persist_state=True)
 
         rendered = cfg.yaml_text()
 
-        self.assertIn(f"          path: {Path.home() / '.codex'}", rendered)
         self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
         self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
         self.assertIn("subPath: .paseo", rendered)
+        self.assertNotIn("hostPath:", rendered)
+
+    def test_persisted_codex_state_mounts_project_subpath_when_workspace_differs(self) -> None:
+        cfg = self.make_agent_config(
+            persist_state=True,
+            mount_path="/workspace",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("        - name: codex-home", rendered)
+        self.assertIn(f"mountPath: /home/{self.PROJECT}/.codex", rendered)
+        self.assertIn("subPath: .codex", rendered)
+        self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
 
     def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
         cfg = self.make_agent_config(
@@ -259,6 +299,26 @@ trust_level = "trusted"
         self.assertEqual(loaded.agent_cmd, "multi")
         self.assertEqual(loaded.agent, "Codex + Claude Code")
         self.assertEqual(loaded.auth_files[0].key, "claude-auth.json")
+
+    def test_gather_agent_auth_files_reads_repo_local_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "agentctl"
+            (secrets_dir / "codex").mkdir(parents=True)
+            (secrets_dir / "claude").mkdir(parents=True)
+            (secrets_dir / "codex" / "auth.json").write_text('{"auth_mode":"chatgpt"}')
+            (secrets_dir / "codex" / "config.toml").write_text(
+                'model_provider = "openai"\n'
+                '[projects."/tmp/foo"]\n'
+                'trust_level = "trusted"\n'
+            )
+            (secrets_dir / "claude" / "auth.json").write_text('{"token":"abc"}')
+
+            with patch("scripts.agentctl.SECRETS_DIR", secrets_dir):
+                auth_files = gather_agent_auth_files(self.PROJECT)
+
+        self.assertEqual([item.key for item in auth_files], ["codex-auth.json", "codex-config.toml", "claude-auth.json"])
+        self.assertEqual(auth_files[0].mount_path, f"/home/{self.PROJECT}/.codex/auth.json")
+        self.assertNotIn('trust_level = "trusted"', auth_files[1].content)
 
     def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
         cfg = self.make_config(

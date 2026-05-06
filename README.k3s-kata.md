@@ -104,7 +104,8 @@ normalizes it to `Gi` before saving the canonical config and rendered manifest.
 ### Agent defaults
 
 - `Codex` and `Claude Code` are both installed in generated guests
-- local auth files are copied into the guest automatically when present
+- repo-local auth files under `secrets/agentctl/` are copied into the guest
+  automatically when present
 - `Codex` auto-installs `bubblewrap`
 - `paseo` is auto-installed, starts during bootstrap, and persists pairing
   state under the mounted workspace
@@ -113,14 +114,13 @@ normalizes it to `Gi` before saving the canonical config and rendered manifest.
 
 Codex:
 
-- `~/.codex/auth.json`
+- `secrets/agentctl/codex/auth.json`
 - optional `OPENAI_API_KEY` fallback
-- existing `~/.codex/auth.json` is reused automatically during container creation
+- optional `secrets/agentctl/codex/config.toml`
 
 Claude Code:
 
-- `~/.config/claude-code/auth.json`
-- `~/.claude.json`
+- `secrets/agentctl/claude/auth.json`
 - optional `ANTHROPIC_API_KEY` fallback
 
 ### Generated artifacts

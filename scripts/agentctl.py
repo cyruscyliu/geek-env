@@ -6,6 +6,7 @@ Interactive generator and manager for k3s + Kata Containers agent deployments.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -28,6 +29,7 @@ import yaml
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 OUTPUT_DIR = REPO_ROOT / "agents"
+SECRETS_DIR = REPO_ROOT / "secrets" / "agentctl"
 
 BOLD = "\033[1m"
 CYAN = "\033[36m"
@@ -420,6 +422,29 @@ def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_ho
     )
 
 
+def build_auth_copy_lines(container_user: str, auth_files: list["AgentAuthFile"]) -> str:
+    if not auth_files:
+        return ""
+    lines: list[str] = []
+    for item in auth_files:
+        encoded = base64.b64encode(item.content.encode("utf-8")).decode("ascii")
+        parent = str(Path(item.mount_path).parent)
+        path_quoted = shlex.quote(item.mount_path)
+        parent_quoted = shlex.quote(parent)
+        encoded_quoted = shlex.quote(encoded)
+        lines.append(
+            "          python3 -c "
+            + shlex.quote(
+                "import base64, pathlib; "
+                f"path = pathlib.Path({item.mount_path!r}); "
+                f"path.parent.mkdir(parents=True, exist_ok=True); "
+                f"path.write_bytes(base64.b64decode({encoded!r}));"
+            )
+            + f" && chown {container_user}:{container_user} {parent_quoted} {path_quoted} && chmod 600 {path_quoted} && \\\n"
+        )
+    return "".join(lines)
+
+
 def indent_block(text: str, spaces: int) -> str:
     prefix = " " * spaces
     return "\n".join(f"{prefix}{line}" if line else prefix.rstrip() for line in text.splitlines())
@@ -502,10 +527,6 @@ class AgentConfig:
     @property
     def agent_state_host_path(self) -> str:
         return f"{self.host_path.rstrip('/')}/.agent-state"
-
-    @property
-    def codex_state_host_path(self) -> str:
-        return str(Path.home() / ".codex")
 
     def to_config_dict(self) -> dict:
         return {
@@ -644,6 +665,7 @@ class AgentConfig:
             build_agent_wrapper_line("codex", "")
             + build_agent_wrapper_line("claude", "")
         )
+        auth_copy_lines = build_auth_copy_lines(user, self.auth_files)
         paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
         return (
             "          set -eux && \\\n"
@@ -651,7 +673,7 @@ class AgentConfig:
             f"{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
             f"            {self.all_packages} && \\\n"
-            f"{build_sudoers_line(user)}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{paseo_bootstrap_line}"
+            f"{build_sudoers_line(user)}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -669,29 +691,6 @@ class AgentConfig:
                 ]
             )
         ]
-
-        if self.auth_files:
-            docs.append(
-                "\n".join(
-                    [
-                        "apiVersion: v1",
-                        "kind: Secret",
-                        "metadata:",
-                        f"  name: {self.project_name}-agent-auth",
-                        f"  namespace: {self.project_name}",
-                        "type: Opaque",
-                        "stringData:",
-                    ]
-                    + [
-                        line
-                        for item in self.auth_files
-                        for line in [
-                            f"  {item.key}: |",
-                            indent_block(item.content, 4),
-                        ]
-                    ]
-                )
-            )
 
         docs.append(
             "\n".join(
@@ -751,11 +750,12 @@ class AgentConfig:
             "        - name: project",
             f"          mountPath: {self.mount_path}",
         ]
-        if self.persist_state:
+        if self.persist_state and self.mount_path != self.container_home:
             deployment_lines.extend(
                 [
                     "        - name: codex-home",
                     f"          mountPath: {self.container_home}/.codex",
+                    "          subPath: .codex",
                 ]
             )
         if self.agent_cmd:
@@ -764,15 +764,6 @@ class AgentConfig:
                     "        - name: project",
                     f"          mountPath: {self.container_home}/.paseo",
                     "          subPath: .paseo",
-                ]
-            )
-        for item in self.auth_files:
-            deployment_lines.extend(
-                [
-                    "        - name: agent-auth",
-                    f"          mountPath: {item.mount_path}",
-                    f"          subPath: {item.key}",
-                    "          readOnly: true",
                 ]
             )
         env_items: list[str] = []
@@ -801,23 +792,6 @@ class AgentConfig:
                 f"          claimName: {self.project_pvc_name}",
             ]
         )
-        if self.persist_state:
-            deployment_lines.extend(
-                [
-                    "      - name: codex-home",
-                    "        hostPath:",
-                    f"          path: {self.codex_state_host_path}",
-                    "          type: DirectoryOrCreate",
-                ]
-            )
-        if self.auth_files:
-            deployment_lines.extend(
-                [
-                    "      - name: agent-auth",
-                    "        secret:",
-                    f"          secretName: {self.project_name}-agent-auth",
-                ]
-            )
         docs.append("\n".join(deployment_lines))
 
         if self.expose_service:
@@ -1383,7 +1357,7 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
     container_home = f"/home/{project_name}"
     auth_files: list[AgentAuthFile] = []
 
-    codex_auth_path = Path.home() / ".codex" / "auth.json"
+    codex_auth_path = SECRETS_DIR / "codex" / "auth.json"
     if codex_auth_path.exists():
         ok(f"Read Codex auth file from {codex_auth_path}")
         auth_files.append(
@@ -1394,9 +1368,9 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
             )
         )
     else:
-        hint("No existing Codex auth file found on this host.")
+        hint(f"No Codex auth file found in {SECRETS_DIR / 'codex'}.")
 
-    codex_config_path = Path.home() / ".codex" / "config.toml"
+    codex_config_path = SECRETS_DIR / "codex" / "config.toml"
     if codex_config_path.exists():
         ok(f"Read Codex config file from {codex_config_path}")
         auth_files.append(
@@ -1407,12 +1381,12 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
             )
         )
     else:
-        hint("No existing Codex config file found on this host.")
+        hint(f"No Codex config file found in {SECRETS_DIR / 'codex'}.")
 
     claude_auth_path = find_first_existing(
         [
-            Path.home() / ".config" / "claude-code" / "auth.json",
-            Path.home() / ".claude.json",
+            SECRETS_DIR / "claude" / "auth.json",
+            SECRETS_DIR / "claude" / ".claude.json",
         ]
     )
     if claude_auth_path is not None:
@@ -1425,7 +1399,7 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
             )
         )
     else:
-        hint("No existing Claude Code auth file found on this host.")
+        hint(f"No Claude auth file found in {SECRETS_DIR / 'claude'}.")
 
     return auth_files
 
