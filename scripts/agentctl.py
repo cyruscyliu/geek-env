@@ -373,17 +373,23 @@ def build_sudoers_line(container_user: str) -> str:
     )
 
 
+def build_paseo_runtime_cleanup_line(container_home: str) -> str:
+    return f"          rm -f {container_home}/.paseo/paseo.pid && \\\n"
+
+
 def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_home: str) -> str:
     if not agent_cmd:
         return ""
     if container_user == "root":
         return (
+            f"{build_paseo_runtime_cleanup_line(container_home)}"
             "          echo 'starting paseo daemon' && \\\n"
             f"          PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start && \\\n"
             "          echo 'pairing paseo daemon' && \\\n"
             f"          paired=0; for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test \"$paired\" = 1 && \\\n"
         )
     return (
+        f"{build_paseo_runtime_cleanup_line(container_home)}"
         "          echo 'starting paseo daemon' && \\\n"
         f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
         "          echo 'pairing paseo daemon' && \\\n"

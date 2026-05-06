@@ -12,6 +12,7 @@ from scripts.agentctl import (
     PlainEnvVar,
     apply_saved_project,
     agent_label_for_cmd,
+    build_paseo_runtime_cleanup_line,
     build_ssh_keygen_line,
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
@@ -301,8 +302,14 @@ trust_level = "trusted"
 
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
         rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
+        self.assertIn(f"rm -f /home/{self.PROJECT}/.paseo/paseo.pid", rendered)
         self.assertIn("paseo daemon start", rendered)
         self.assertIn("paseo daemon pair --json", rendered)
+
+    def test_paseo_runtime_cleanup_removes_only_stale_pid(self) -> None:
+        rendered = build_paseo_runtime_cleanup_line(f"/home/{self.PROJECT}")
+
+        self.assertEqual(rendered, f"          rm -f /home/{self.PROJECT}/.paseo/paseo.pid && \\\n")
 
     def test_full_bootstrap_generates_default_ssh_keypair(self) -> None:
         cfg = self.make_config()
