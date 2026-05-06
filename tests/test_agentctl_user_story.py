@@ -318,13 +318,13 @@ trust_level = "trusted"
 
         self.assertIn("apt-get install -y \\\n            openssh-client ", rendered)
         self.assertIn(f"mkdir -p /home/{self.PROJECT}/.ssh", rendered)
-        self.assertIn("ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519", rendered)
+        self.assertIn("ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f ~/.ssh/id_ed25519", rendered)
 
     def test_root_ssh_keygen_line_is_idempotent(self) -> None:
         rendered = build_ssh_keygen_line("root", "/root")
 
         self.assertIn("if [ ! -f /root/.ssh/id_ed25519 ]; then", rendered)
-        self.assertIn("ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/id_ed25519", rendered)
+        self.assertIn("ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /root/.ssh/id_ed25519", rendered)
 
     def test_container_identity_uses_project_name(self) -> None:
         cfg = self.make_agent_config()

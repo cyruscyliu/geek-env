@@ -356,11 +356,11 @@ def build_ssh_keygen_line(container_user: str, container_home: str) -> str:
     if container_user == "root":
         return (
             f"          mkdir -p {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
-            f"          if [ ! -f {key_path} ]; then ssh-keygen -q -t ed25519 -N '' -f {key_path}; fi && \\\n"
+            f"          if [ ! -f {key_path} ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f {key_path}; fi && \\\n"
         )
     return (
         f"          mkdir -p {ssh_dir} && chown {container_user}:{container_user} {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
-        f"          if [ ! -f {key_path} ]; then su - {container_user} -c \"mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519\"; fi && \\\n"
+        f"          if [ ! -f {key_path} ]; then su - {container_user} -c \"mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f ~/.ssh/id_ed25519\"; fi && \\\n"
         f"          chown {container_user}:{container_user} {key_path} {key_path}.pub && chmod 600 {key_path} && chmod 644 {key_path}.pub && \\\n"
     )
 
