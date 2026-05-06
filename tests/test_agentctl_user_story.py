@@ -15,6 +15,7 @@ from scripts.agentctl import (
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
     is_valid_project_name,
+    load_project_config,
     sanitize_codex_config_toml,
     restore_files,
     snapshot_files,
@@ -272,6 +273,45 @@ trust_level = "trusted"
         self.assertEqual([item.key for item in auth_files], ["codex-auth.json", "codex-config.toml", "claude-settings.json"])
         self.assertEqual(auth_files[0].mount_path, f"/home/{self.PROJECT}/.codex/auth.json")
         self.assertNotIn('trust_level = "trusted"', auth_files[1].content)
+
+    def test_load_project_config_refreshes_auth_files_from_repo_local_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "agents"
+            secrets_dir = Path(tmpdir) / "agentctl"
+            output_dir.mkdir(parents=True)
+            (secrets_dir / "codex").mkdir(parents=True)
+            (secrets_dir / "claude").mkdir(parents=True)
+            (secrets_dir / "codex" / "auth.json").write_text('{"auth_mode":"chatgpt"}')
+            (secrets_dir / "codex" / "config.toml").write_text('model_provider = "openai"\n')
+            (secrets_dir / "claude" / "settings.json").write_text('{"token":"abc"}')
+
+            stale_cfg = self.make_agent_config(
+                auth_files=[
+                    AgentAuthFile(
+                        key="codex-auth.json",
+                        mount_path=f"/home/{self.PROJECT}/.codex/auth.json",
+                        content="",
+                    ),
+                    AgentAuthFile(
+                        key="codex-config.toml",
+                        mount_path=f"/home/{self.PROJECT}/.codex/config.toml",
+                        content="",
+                    ),
+                ]
+            )
+            (output_dir / f"{self.PROJECT}.agent.yaml").write_text(stale_cfg.config_text())
+
+            with (
+                patch("scripts.agentctl.OUTPUT_DIR", output_dir),
+                patch("scripts.agentctl.SECRETS_DIR", secrets_dir),
+            ):
+                loaded = load_project_config(self.PROJECT)
+
+        self.assertEqual(
+            [item.key for item in loaded.auth_files],
+            ["codex-auth.json", "codex-config.toml", "claude-settings.json"],
+        )
+        self.assertEqual(loaded.auth_files[0].content, '{"auth_mode":"chatgpt"}')
 
     def test_minimal_bootstrap_keeps_sudo_passwordless(self) -> None:
         cfg = self.make_config(

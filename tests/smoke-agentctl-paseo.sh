@@ -80,7 +80,7 @@ write_project_files(cfg)
 
 custom_bootstrap = """          set -eux && \\
           if ! id {project} >/dev/null 2>&1; then useradd -m -s /bin/bash {project}; fi && \\
-          mkdir -p /home/{project} /home/{project}/.paseo && \\
+          mkdir -p /home/{project} /home/{project}/.codex /home/{project}/.claude /home/{project}/.paseo && \\
           chown -R {project}:{project} /home/{project} && \\
           apt-get update && apt-get install -y ca-certificates curl nodejs npm && \\
           echo 'installing @getpaseo/cli with verbose npm output' && \\

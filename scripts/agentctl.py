@@ -804,7 +804,11 @@ def load_project_config(project_name: str) -> AgentConfig:
     if not config_path.exists():
         fail(f"Config not found: {config_path}")
     data = yaml.safe_load(config_path.read_text()) or {}
-    return AgentConfig.from_config_dict(data)
+    cfg = AgentConfig.from_config_dict(data)
+    fresh_auth_files = gather_agent_auth_files(project_name)
+    if fresh_auth_files:
+        cfg.auth_files = fresh_auth_files
+    return cfg
 
 
 def get_project_pod(project_name: str, ready_only: bool = False) -> str:
@@ -1550,6 +1554,7 @@ def print_summary(cfg: AgentConfig) -> None:
 
 def apply_saved_project(project_name: str) -> None:
     cfg = load_project_config(project_name)
+    write_project_files(cfg)
     generation_before = get_deployment_generation(project_name)
     observed_before = get_deployment_generation(project_name, observed=True)
     apply_project_manifest(cfg)
