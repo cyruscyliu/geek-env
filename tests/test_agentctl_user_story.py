@@ -12,6 +12,7 @@ from scripts.agentctl import (
     PlainEnvVar,
     apply_saved_project,
     agent_label_for_cmd,
+    build_ssh_keygen_line,
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
     is_valid_project_name,
@@ -302,6 +303,21 @@ trust_level = "trusted"
         rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
         self.assertIn("paseo daemon start", rendered)
         self.assertIn("paseo daemon pair --json", rendered)
+
+    def test_full_bootstrap_generates_default_ssh_keypair(self) -> None:
+        cfg = self.make_config()
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertIn("apt-get install -y \\\n            openssh-client ", rendered)
+        self.assertIn(f"mkdir -p /home/{self.PROJECT}/.ssh", rendered)
+        self.assertIn("ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519", rendered)
+
+    def test_root_ssh_keygen_line_is_idempotent(self) -> None:
+        rendered = build_ssh_keygen_line("root", "/root")
+
+        self.assertIn("if [ ! -f /root/.ssh/id_ed25519 ]; then", rendered)
+        self.assertIn("ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/id_ed25519", rendered)
 
     def test_container_identity_uses_project_name(self) -> None:
         cfg = self.make_agent_config()

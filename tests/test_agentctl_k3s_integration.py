@@ -120,6 +120,33 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
         )
         self.assertEqual((result.stdout or "").strip(), "2")
 
+    def test_full_bootstrap_generates_default_ssh_keypair(self) -> None:
+        cfg = self.make_config(
+            bootstrap_profile="full",
+            all_packages="curl nodejs npm",
+        )
+        self.write_and_load_config(cfg)
+        ready_pod = self.wait_until_ready(cfg, timeout_seconds=300)
+
+        result = agentctl.kubectl(
+            [
+                "exec",
+                ready_pod,
+                "--",
+                "su",
+                "-",
+                self.project_name,
+                "-c",
+                "test -f ~/.ssh/id_ed25519 && test -f ~/.ssh/id_ed25519.pub && stat -c '%a %U %G' ~/.ssh && stat -c '%a %U %G' ~/.ssh/id_ed25519",
+            ],
+            namespace=self.project_name,
+        )
+
+        lines = (result.stdout or "").strip().splitlines()
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertEqual(lines[0].strip(), f"700 {self.project_name} {self.project_name}")
+        self.assertEqual(lines[1].strip(), f"600 {self.project_name} {self.project_name}")
+
     def test_graph_starting_failed_delete_none(self) -> None:
         cfg = self.make_config(cpu="999")
         self.write_and_load_config(cfg)

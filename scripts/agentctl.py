@@ -350,6 +350,21 @@ def build_agent_dirs_line(container_user: str, container_home: str) -> str:
     )
 
 
+def build_ssh_keygen_line(container_user: str, container_home: str) -> str:
+    ssh_dir = f"{container_home}/.ssh"
+    key_path = f"{ssh_dir}/id_ed25519"
+    if container_user == "root":
+        return (
+            f"          mkdir -p {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
+            f"          if [ ! -f {key_path} ]; then ssh-keygen -q -t ed25519 -N '' -f {key_path}; fi && \\\n"
+        )
+    return (
+        f"          mkdir -p {ssh_dir} && chown {container_user}:{container_user} {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
+        f"          if [ ! -f {key_path} ]; then su - {container_user} -c \"mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519\"; fi && \\\n"
+        f"          chown {container_user}:{container_user} {key_path} {key_path}.pub && chmod 600 {key_path} && chmod 644 {key_path}.pub && \\\n"
+    )
+
+
 def build_sudoers_line(container_user: str) -> str:
     return (
         "          mkdir -p /etc/sudoers.d && \\\n"
@@ -615,13 +630,14 @@ class AgentConfig:
             + build_agent_wrapper_line("claude", "")
         )
         auth_copy_lines = build_auth_copy_lines(user, self.auth_files)
+        ssh_keygen_line = build_ssh_keygen_line(user, home)
         paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
         return (
             "          set -eux && \\\n"
             f"{user_setup_line}{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
-            f"            {self.all_packages} && \\\n"
-            f"{sudoers_line}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{paseo_bootstrap_line}"
+            f"            openssh-client {self.all_packages} && \\\n"
+            f"{sudoers_line}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
