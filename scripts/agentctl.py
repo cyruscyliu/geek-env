@@ -398,8 +398,8 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
 
 def build_agent_dirs_line(container_user: str, container_home: str) -> str:
     return (
-        f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.config/claude-code {container_home}/.paseo && \\\n"
-        f"          chown {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.config {container_home}/.paseo && \\\n"
+        f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
+        f"          chown {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
     )
 
 
@@ -1385,21 +1385,20 @@ def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
 
     claude_auth_path = find_first_existing(
         [
-            SECRETS_DIR / "claude" / "auth.json",
-            SECRETS_DIR / "claude" / ".claude.json",
+            SECRETS_DIR / "claude" / "settings.json",
         ]
     )
     if claude_auth_path is not None:
         ok(f"Read Claude Code credentials from {claude_auth_path}")
         auth_files.append(
             AgentAuthFile(
-                key="claude-auth.json",
-                mount_path=f"{container_home}/.config/claude-code/auth.json",
+                key="claude-settings.json",
+                mount_path=f"{container_home}/.claude/settings.json",
                 content=claude_auth_path.read_text(),
             )
         )
     else:
-        hint(f"No Claude auth file found in {SECRETS_DIR / 'claude'}.")
+        hint(f"No Claude settings file found in {SECRETS_DIR / 'claude'}.")
 
     return auth_files
 

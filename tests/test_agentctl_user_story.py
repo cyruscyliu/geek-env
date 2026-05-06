@@ -204,8 +204,8 @@ trust_level = "trusted"
                     content='{"auth_mode":"chatgpt"}',
                 ),
                 AgentAuthFile(
-                    key="claude-auth.json",
-                    mount_path=f"/home/{self.PROJECT}/.config/claude-code/auth.json",
+                    key="claude-settings.json",
+                    mount_path=f"/home/{self.PROJECT}/.claude/settings.json",
                     content='{"token":"abc"}',
                 ),
             ]
@@ -218,7 +218,7 @@ trust_level = "trusted"
         self.assertNotIn("name: agent-auth", rendered)
         self.assertIn("path.write_bytes(base64.b64decode", rendered)
         self.assertIn(f"/home/{self.PROJECT}/.codex/auth.json", rendered)
-        self.assertIn(f"/home/{self.PROJECT}/.config/claude-code/auth.json", rendered)
+        self.assertIn(f"/home/{self.PROJECT}/.claude/settings.json", rendered)
 
     def test_persisted_codex_state_uses_project_pvc_not_host_home(self) -> None:
         cfg = self.make_agent_config(persist_state=True)
@@ -287,8 +287,8 @@ trust_level = "trusted"
                 "auth": {
                     "files": [
                         {
-                            "key": "claude-auth.json",
-                            "mount_path": f"/home/{self.PROJECT}/.config/claude-code/auth.json",
+                            "key": "claude-settings.json",
+                            "mount_path": f"/home/{self.PROJECT}/.claude/settings.json",
                             "content": "{}",
                         }
                     ]
@@ -298,7 +298,7 @@ trust_level = "trusted"
 
         self.assertEqual(loaded.agent_cmd, "multi")
         self.assertEqual(loaded.agent, "Codex + Claude Code")
-        self.assertEqual(loaded.auth_files[0].key, "claude-auth.json")
+        self.assertEqual(loaded.auth_files[0].key, "claude-settings.json")
 
     def test_gather_agent_auth_files_reads_repo_local_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -311,12 +311,12 @@ trust_level = "trusted"
                 '[projects."/tmp/foo"]\n'
                 'trust_level = "trusted"\n'
             )
-            (secrets_dir / "claude" / "auth.json").write_text('{"token":"abc"}')
+            (secrets_dir / "claude" / "settings.json").write_text('{"token":"abc"}')
 
             with patch("scripts.agentctl.SECRETS_DIR", secrets_dir):
                 auth_files = gather_agent_auth_files(self.PROJECT)
 
-        self.assertEqual([item.key for item in auth_files], ["codex-auth.json", "codex-config.toml", "claude-auth.json"])
+        self.assertEqual([item.key for item in auth_files], ["codex-auth.json", "codex-config.toml", "claude-settings.json"])
         self.assertEqual(auth_files[0].mount_path, f"/home/{self.PROJECT}/.codex/auth.json")
         self.assertNotIn('trust_level = "trusted"', auth_files[1].content)
 

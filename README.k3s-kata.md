@@ -120,7 +120,7 @@ Codex:
 
 Claude Code:
 
-- `secrets/agentctl/claude/auth.json`
+- `secrets/agentctl/claude/settings.json`
 - optional `ANTHROPIC_API_KEY` fallback
 
 ### Generated artifacts
