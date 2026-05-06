@@ -141,7 +141,6 @@ Actions:
 
 - `exec`
 - `update`
-- `rebuild`
 - `restart`
 - `status`
 - `delete`
@@ -154,7 +153,7 @@ Actions:
 - prints the current `paseo` pairing payload before attach when available
 - attaches in a shell as the project user
 - starts in the configured work directory
-- mounts the host `~/.codex` into the project user's home so Codex state is shared across projects
+- uses the project user's `~/.codex` inside the container
 - does not auto-run the coding agent on attach
 - installs Codex behind a `codex` wrapper so the normal command includes the saved args
 - installs Claude Code behind a `claude` wrapper so the normal command includes the saved args
@@ -201,22 +200,11 @@ Choose `update`.
 This reapplies the rendered `agents/<project>.yaml` from the saved
 `agents/<project>.agent.yaml` config. It only rolls a new pod if the rendered
 manifest changes the Deployment pod template. The manage flow reports whether
-it detected a rollout or is reusing the current pod before attaching, and shows
-the pod it is watching plus provisioning logs once the new container starts.
+it detected a rollout or is reusing the current pod, and reports the pod that
+is ready when the update completes.
 Before applying, it also checks the requested CPU, memory, and ephemeral
 storage against remaining requested headroom on ready schedulable nodes and
 fails early if nothing in the cluster can fit the pod.
-
-### Rebuild a container from current generator logic
-
-```bash
-python3 scripts/agentctl.py <project>
-```
-
-Choose `rebuild`.
-
-This regenerates `agents/<project>.yaml` from `agents/<project>.agent.yaml`
-using the current `scripts/agentctl.py` logic, then reapplies the manifest.
 
 ## `scripts/refresh-k3s-network.sh`
 

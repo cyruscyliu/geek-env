@@ -1308,7 +1308,6 @@ def manage_project(project_name: str) -> None:
             [
             "exec    — attach agent shell",
             "update  — render saved config and apply it",
-            "rebuild — regenerate manifest and roll a new pod",
             "restart — rolling restart with current manifest",
             "status  — show deployment, pod, and logs",
             "delete  — delete deployment + namespace",
@@ -1340,12 +1339,6 @@ def manage_project(project_name: str) -> None:
             pod = get_project_pod(project_name, ready_only=True) or get_project_pod(project_name)
         if pod:
             ok(f"{pod} is ready.")
-        return
-    if action.startswith("rebuild"):
-        apply_project_manifest(cfg)
-        ok("Waiting for rebuilt pod to become ready...")
-        pod = wait_for_deployment_ready(project_name)
-        ok(f"{pod} is ready.")
         return
     if action.startswith("restart"):
         ok(f"Restarting deployment/{project_name}...")
