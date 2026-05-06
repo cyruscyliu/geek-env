@@ -719,6 +719,8 @@ class AgentConfig:
             "spec:",
             "  progressDeadlineSeconds: 900",
             "  replicas: 1",
+            "  strategy:",
+            "    type: Recreate",
             "  selector:",
             "    matchLabels:",
             f"      app: {self.project_name}",
@@ -1330,20 +1332,21 @@ def manage_project(project_name: str) -> None:
             if observed_after and observed_after != observed_before:
                 hint(f"Deployment controller observed generation {observed_after}.")
             pod = get_project_pod(project_name, ready_only=True) or get_project_pod(project_name)
-        attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
+        if pod:
+            ok(f"{pod} is ready.")
         return
     if action.startswith("rebuild"):
         apply_project_manifest(cfg)
         ok("Waiting for rebuilt pod to become ready...")
         pod = wait_for_deployment_ready(project_name)
-        attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
+        ok(f"{pod} is ready.")
         return
     if action.startswith("restart"):
         ok(f"Restarting deployment/{project_name}...")
         kubectl(["rollout", "restart", f"deployment/{project_name}"], namespace=project_name, capture=False)
         ok("Waiting for restarted pod to become ready...")
         pod = wait_for_deployment_ready(project_name)
-        attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
+        ok(f"{pod} is ready.")
         return
     if action.startswith("status"):
         pod = get_project_pod(project_name)

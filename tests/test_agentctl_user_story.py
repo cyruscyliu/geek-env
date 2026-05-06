@@ -16,6 +16,7 @@ from scripts.agentctl import (
     gather_agent_auth_files,
     is_valid_project_name,
     kubectl_exec_args_for_terminal,
+    manage_project,
     sanitize_codex_config_toml,
     restore_files,
     snapshot_files,
@@ -226,6 +227,7 @@ trust_level = "trusted"
 
         rendered = cfg.yaml_text()
 
+        self.assertIn("  strategy:\n    type: Recreate", rendered)
         self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
         self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
         self.assertIn("subPath: .paseo", rendered)
@@ -366,6 +368,40 @@ trust_level = "trusted"
 
         with patch("sys.stdin.isatty", return_value=False), patch("sys.stdout.isatty", return_value=False):
             self.assertEqual(kubectl_exec_args_for_terminal(), [])
+
+    def test_manage_project_restart_waits_but_does_not_attach(self) -> None:
+        cfg = self.make_agent_config()
+
+        with (
+            patch("scripts.agentctl.load_project_config", return_value=cfg),
+            patch("scripts.agentctl.kubectl") as kubectl,
+            patch("scripts.agentctl.choose", return_value="restart"),
+            patch("scripts.agentctl.wait_for_deployment_ready", return_value="pod/morpheus-new"),
+            patch("scripts.agentctl.attach_to_project_pod") as attach,
+            patch("scripts.agentctl.os.system"),
+        ):
+            kubectl.return_value.returncode = 0
+            manage_project(self.PROJECT)
+
+        attach.assert_not_called()
+
+    def test_manage_project_status_does_not_attach(self) -> None:
+        cfg = self.make_agent_config()
+
+        with (
+            patch("scripts.agentctl.load_project_config", return_value=cfg),
+            patch("scripts.agentctl.kubectl") as kubectl,
+            patch("scripts.agentctl.choose", return_value="status"),
+            patch("scripts.agentctl.get_project_pod", return_value="pod/morpheus-current"),
+            patch("scripts.agentctl.print_deploy_diagnostics") as diagnostics,
+            patch("scripts.agentctl.attach_to_project_pod") as attach,
+            patch("scripts.agentctl.os.system"),
+        ):
+            kubectl.return_value.returncode = 0
+            manage_project(self.PROJECT)
+
+        diagnostics.assert_called_once()
+        attach.assert_not_called()
 
 
 if __name__ == "__main__":
