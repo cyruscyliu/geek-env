@@ -2,8 +2,9 @@
 
 Agent Vault is an AI-native environment for isolated coding agents. It runs
 agent workloads in VM-backed sandboxes, with
-[Paseo](https://github.com/getpaseo/paseo) managing the runtime inside each
-guest.
+[Headlamp](https://headlamp.dev/) managing k3s pods and
+[Paseo](https://github.com/getpaseo/paseo) managing the agent runtime inside
+each guest.
 
 ![Platform](https://img.shields.io/badge/platform-k3s-blue)
 ![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
@@ -21,10 +22,10 @@ pyhton3 -m pip install -r requirements.txt
 python3 scripts/agentctl.py
 ```
 
-To re-enter or manage a vault later:
+Apply the generated manifest when ready:
 
 ```bash
-python3 scripts/agentctl.py <project>
+kubectl apply -f agents/<project>.yaml
 ```
 
 For tool-specific usage details, see:
