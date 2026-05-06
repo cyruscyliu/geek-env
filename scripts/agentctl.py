@@ -1174,6 +1174,12 @@ def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd:
         result = subprocess.run(command, cwd=str(REPO_ROOT), check=False)
         if result.returncode == 0:
             return
+        data = get_pod_json(project_name, pod)
+        statuses = data.get("status", {}).get("containerStatuses") or []
+        if statuses:
+            state = statuses[0].get("state", {})
+            if not state.get("waiting"):
+                return
         if time.time() >= deadline:
             fail(f"Could not attach to {pod} after waiting for an exec-ready container")
         time.sleep(2)

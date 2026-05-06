@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -402,6 +403,34 @@ trust_level = "trusted"
 
         diagnostics.assert_called_once()
         attach.assert_not_called()
+
+    def test_attach_does_not_reattach_after_shell_exit(self) -> None:
+        pod_json = {
+            "status": {
+                "containerStatuses": [
+                    {
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-05-06T08:00:00Z",
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+
+        with (
+            patch("scripts.agentctl.maybe_start_log_stream"),
+            patch("scripts.agentctl.stop_log_stream"),
+            patch("scripts.agentctl.kubectl_exec_args_for_terminal", return_value=["-it"]),
+            patch("scripts.agentctl.get_pod_json", side_effect=[pod_json, pod_json]),
+            patch("scripts.agentctl.subprocess.run", return_value=SimpleNamespace(returncode=127)) as run_exec,
+        ):
+            from scripts.agentctl import attach_to_project_pod
+
+            attach_to_project_pod(self.PROJECT, "pod/morpheus", self.MOUNT_PATH, "multi")
+
+        run_exec.assert_called_once()
 
 
 if __name__ == "__main__":
