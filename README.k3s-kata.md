@@ -75,6 +75,48 @@ kubectl get nodes -o wide
 kubectl describe node <worker-name>
 ```
 
+## Headlamp Web UI
+
+Headlamp is installed as the cluster web UI for browsing pods, logs, workloads,
+services, and storage from a browser.
+
+Resources:
+
+- namespace: `kube-system`
+- deployment: `headlamp`
+- service: `headlamp`
+- admin service account: `headlamp-admin`
+
+### Access
+
+Start a port-forward on all interfaces:
+
+```bash
+kubectl -n kube-system port-forward --address 0.0.0.0 svc/headlamp 8081:80
+```
+
+Open:
+
+```text
+http://<server-ip>:8081
+```
+
+Generate a login token:
+
+```bash
+kubectl -n kube-system create token headlamp-admin
+```
+
+Paste that token into the Headlamp login screen.
+
+### Remove
+
+```bash
+kubectl delete clusterrolebinding headlamp-admin
+kubectl -n kube-system delete serviceaccount headlamp-admin
+kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/headlamp/main/kubernetes-headlamp.yaml
+```
+
 ## `scripts/agentctl.py`
 
 Generate and manage an AI-native vault.
@@ -141,9 +183,6 @@ Actions:
 
 - `exec`
 - `update`
-- `restart`
-- `status`
-- `delete`
 
 ### Attach behavior
 
@@ -173,21 +212,13 @@ python3 -m unittest tests/test_agentctl_k3s_integration.py
 They skip cleanly when `kubectl` or the `kata-qemu` RuntimeClass is not
 available.
 
-### Show status
+Use Headlamp for deployment inspection, restarts, and deletion. The web UI is
+the default path for:
 
-```bash
-python3 scripts/agentctl.py <project>
-```
-
-Choose `status`.
-
-### Stop a vault
-
-```bash
-python3 scripts/agentctl.py <project>
-```
-
-Choose `delete`.
+- viewing pod and deployment status
+- reading logs and events
+- restarting workloads
+- deleting deployments, pods, services, PVCs, or namespaces
 
 ### Re-apply a saved manifest
 

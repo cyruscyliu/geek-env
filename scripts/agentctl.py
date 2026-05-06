@@ -41,7 +41,7 @@ RESET = "\033[0m"
 LOG_STREAM_PROCESS: subprocess.Popen[str] | None = None
 
 PublicState = Literal["none", "saved", "starting", "ready", "failed"]
-UserAction = Literal["config", "apply", "exec", "status", "delete"]
+UserAction = Literal["config", "apply", "exec"]
 SystemEvent = Literal["pod_ready", "failure"]
 
 
@@ -76,22 +76,13 @@ def transition_public_state(
     if action is not None:
         transitions: dict[tuple[PublicState, UserAction], PublicState] = {
             ("none", "config"): "saved",
-            ("none", "status"): "none",
             ("saved", "config"): "saved",
             ("saved", "apply"): "starting",
-            ("saved", "status"): "saved",
-            ("saved", "delete"): "none",
-            ("starting", "status"): "starting",
-            ("starting", "delete"): "none",
             ("ready", "config"): "saved",
             ("ready", "apply"): "starting",
             ("ready", "exec"): "ready",
-            ("ready", "status"): "ready",
-            ("ready", "delete"): "none",
             ("failed", "config"): "saved",
             ("failed", "apply"): "starting",
-            ("failed", "status"): "failed",
-            ("failed", "delete"): "none",
         }
         try:
             return transitions[(current, action)]
@@ -1308,9 +1299,6 @@ def manage_project(project_name: str) -> None:
             [
             "exec    — attach agent shell",
             "update  — render saved config and apply it",
-            "restart — rolling restart with current manifest",
-            "status  — show deployment, pod, and logs",
-            "delete  — delete deployment + namespace",
         ],
     )
 
@@ -1340,24 +1328,6 @@ def manage_project(project_name: str) -> None:
         if pod:
             ok(f"{pod} is ready.")
         return
-    if action.startswith("restart"):
-        ok(f"Restarting deployment/{project_name}...")
-        kubectl(["rollout", "restart", f"deployment/{project_name}"], namespace=project_name, capture=False)
-        ok("Waiting for restarted pod to become ready...")
-        pod = wait_for_deployment_ready(project_name)
-        ok(f"{pod} is ready.")
-        return
-    if action.startswith("status"):
-        pod = get_project_pod(project_name)
-        print_deploy_diagnostics(project_name, pod)
-        return
-    if action.startswith("delete"):
-        warn(f"This will delete the namespace '{project_name}' and all its resources.")
-        if not confirm("Are you sure?"):
-            return
-        kubectl(["delete", "namespace", project_name], capture=False)
-        ok(f"Deleted namespace {project_name}")
-
 
 def find_first_existing(paths: Iterable[Path]) -> Path | None:
     for path in paths:

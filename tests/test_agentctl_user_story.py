@@ -80,16 +80,6 @@ class UserStoryGraphTest(unittest.TestCase):
     def test_exec_edge(self) -> None:
         self.assertEqual(transition_public_state("ready", "exec"), "ready")
 
-    def test_status_edges(self) -> None:
-        for state in ("none", "saved", "starting", "ready", "failed"):
-            with self.subTest(state=state):
-                self.assertEqual(transition_public_state(state, "status"), state)
-
-    def test_delete_edges(self) -> None:
-        for state in ("saved", "starting", "ready", "failed"):
-            with self.subTest(state=state):
-                self.assertEqual(transition_public_state(state, "delete"), "none")
-
     def test_rejects_invalid_user_edges(self) -> None:
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("none", "apply")
@@ -97,6 +87,10 @@ class UserStoryGraphTest(unittest.TestCase):
             transition_public_state("saved", "exec")
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("starting", "exec")
+        with self.assertRaises(InvalidTransitionError):
+            transition_public_state("ready", "status")  # type: ignore[arg-type]
+        with self.assertRaises(InvalidTransitionError):
+            transition_public_state("ready", "delete")  # type: ignore[arg-type]
 
     def test_rejects_invalid_system_edges(self) -> None:
         with self.assertRaises(InvalidTransitionError):
@@ -108,7 +102,7 @@ class UserStoryGraphTest(unittest.TestCase):
         with self.assertRaises(InvalidTransitionError):
             transition_public_state("saved")
         with self.assertRaises(InvalidTransitionError):
-            transition_public_state("starting", "status", event="failure")
+            transition_public_state("starting", "exec", event="failure")
 
     def test_file_snapshot_restore_rolls_back_new_and_existing_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -370,13 +364,15 @@ trust_level = "trusted"
         with patch("sys.stdin.isatty", return_value=False), patch("sys.stdout.isatty", return_value=False):
             self.assertEqual(kubectl_exec_args_for_terminal(), [])
 
-    def test_manage_project_restart_waits_but_does_not_attach(self) -> None:
+    def test_manage_project_update_waits_but_does_not_attach(self) -> None:
         cfg = self.make_agent_config()
 
         with (
             patch("scripts.agentctl.load_project_config", return_value=cfg),
             patch("scripts.agentctl.kubectl") as kubectl,
-            patch("scripts.agentctl.choose", return_value="restart"),
+            patch("scripts.agentctl.choose", return_value="update"),
+            patch("scripts.agentctl.get_deployment_generation", side_effect=["1", "1", "2", "2"]),
+            patch("scripts.agentctl.apply_project_manifest"),
             patch("scripts.agentctl.wait_for_deployment_ready", return_value="pod/morpheus-new"),
             patch("scripts.agentctl.attach_to_project_pod") as attach,
             patch("scripts.agentctl.os.system"),
@@ -384,24 +380,6 @@ trust_level = "trusted"
             kubectl.return_value.returncode = 0
             manage_project(self.PROJECT)
 
-        attach.assert_not_called()
-
-    def test_manage_project_status_does_not_attach(self) -> None:
-        cfg = self.make_agent_config()
-
-        with (
-            patch("scripts.agentctl.load_project_config", return_value=cfg),
-            patch("scripts.agentctl.kubectl") as kubectl,
-            patch("scripts.agentctl.choose", return_value="status"),
-            patch("scripts.agentctl.get_project_pod", return_value="pod/morpheus-current"),
-            patch("scripts.agentctl.print_deploy_diagnostics") as diagnostics,
-            patch("scripts.agentctl.attach_to_project_pod") as attach,
-            patch("scripts.agentctl.os.system"),
-        ):
-            kubectl.return_value.returncode = 0
-            manage_project(self.PROJECT)
-
-        diagnostics.assert_called_once()
         attach.assert_not_called()
 
     def test_attach_does_not_reattach_after_shell_exit(self) -> None:
