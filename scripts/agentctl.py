@@ -361,6 +361,13 @@ def build_sudoers_line(container_user: str) -> str:
 def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_home: str) -> str:
     if not agent_cmd:
         return ""
+    if container_user == "root":
+        return (
+            "          echo 'starting paseo daemon' && \\\n"
+            f"          PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start && \\\n"
+            "          echo 'pairing paseo daemon' && \\\n"
+            f"          for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1 && \\\n"
+        )
     return (
         "          echo 'starting paseo daemon' && \\\n"
         f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
@@ -442,6 +449,7 @@ class AgentConfig:
     agent_cmd: str
     agent_args: str
     all_packages: str
+    runtime_user: str = ""
     persist_state: bool = True
     bootstrap_profile: str = "full"
     install_rustup: bool = False
@@ -465,11 +473,11 @@ class AgentConfig:
 
     @property
     def container_user(self) -> str:
-        return self.project_name
+        return self.runtime_user or self.project_name
 
     @property
     def container_home(self) -> str:
-        return f"/home/{self.container_user}"
+        return "/root" if self.container_user == "root" else f"/home/{self.container_user}"
 
     @property
     def agent_state_host_path(self) -> str:
@@ -485,6 +493,7 @@ class AgentConfig:
             "runtime": {
                 "class": self.runtime_class,
                 "base_image": self.base_image,
+                "user": self.container_user,
             },
             "resources": {
                 "cpu": self.cpu,
@@ -566,6 +575,7 @@ class AgentConfig:
             mount_path=workspace.get("mount_path", f"/home/{data['project']}"),
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
+            runtime_user=str(runtime.get("user") or ""),
             cpu=str(resources.get("cpu", "2")),
             memory=normalize_binary_quantity(str(resources.get("memory", "4Gi")), "Saved memory limit"),
             storage=normalize_binary_quantity(str(resources.get("ephemeral_storage", "20Gi")), "Saved storage limit"),
@@ -594,14 +604,19 @@ class AgentConfig:
     def build_container_bootstrap_lines(self) -> str:
         user = self.container_user
         home = self.container_home
+        user_setup_line = ""
+        sudoers_line = ""
+        rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \\\n"
+        if user != "root":
+            user_setup_line = f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
+            sudoers_line = build_sudoers_line(user)
+            rustup_line = f"          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su {user} -c 'sh -s -- -y' && \\\n"
         if self.bootstrap_profile == "minimal":
             return (
                 "          set -eux && \\\n"
-                f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
-                f"{build_agent_dirs_line(user, home)}{build_sudoers_line(user)}"
+                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}"
                 "          touch /tmp/.ready && sleep infinity"
             )
-        rustup_line = f"          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su {user} -c 'sh -s -- -y' && \\\n"
         agent_install_line = (
             build_agent_install_line(agent_package_for_cmd("codex"))
             + build_agent_install_line(agent_package_for_cmd("claude"))
@@ -616,11 +631,10 @@ class AgentConfig:
         paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
         return (
             "          set -eux && \\\n"
-            f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
-            f"{build_agent_dirs_line(user, home)}"
+            f"{user_setup_line}{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
             f"            {self.all_packages} && \\\n"
-            f"{build_sudoers_line(user)}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{paseo_bootstrap_line}"
+            f"{sudoers_line}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -805,7 +819,7 @@ def load_project_config(project_name: str) -> AgentConfig:
         fail(f"Config not found: {config_path}")
     data = yaml.safe_load(config_path.read_text()) or {}
     cfg = AgentConfig.from_config_dict(data)
-    fresh_auth_files = gather_agent_auth_files(project_name)
+    fresh_auth_files = gather_agent_auth_files(project_name, cfg.container_home)
     if fresh_auth_files:
         cfg.auth_files = fresh_auth_files
     return cfg
@@ -1043,7 +1057,8 @@ def wait_for_project_tools(project_name: str, pod: str, agent_cmd: str, timeout_
 
 def read_paseo_pairing_info(project_name: str, pod: str, timeout_seconds: int = 120) -> dict:
     deadline = time.time() + timeout_seconds
-    container_home = f"/home/{project_name}"
+    cfg = load_project_config(project_name)
+    container_home = cfg.container_home
     cmd = (
         f"if [ -s {container_home}/.paseo/pairing.json ]; then "
         f"cat {container_home}/.paseo/pairing.json; "
@@ -1052,11 +1067,8 @@ def read_paseo_pairing_info(project_name: str, pod: str, timeout_seconds: int = 
         "fi"
     )
     while time.time() < deadline:
-        result = kubectl(
-            ["exec", pod, "--", "su", "-", project_name, "-c", cmd],
-            namespace=project_name,
-            check=False,
-        )
+        exec_args = ["exec", pod, "--", "sh", "-lc", cmd] if cfg.container_user == "root" else ["exec", pod, "--", "su", "-", cfg.container_user, "-c", cmd]
+        result = kubectl(exec_args, namespace=project_name, check=False)
         output = (result.stdout or "").strip()
         if result.returncode == 0 and output:
             try:
@@ -1099,20 +1111,35 @@ def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd:
     exec_flags = kubectl_exec_args_for_terminal()
     if "-t" not in "".join(exec_flags):
         hint("No local TTY detected; using a non-interactive exec session.")
-    command = [
-        "kubectl",
-        "-n",
-        project_name,
-        "exec",
-        *exec_flags,
-        pod,
-        "--",
-        "su",
-        "-",
-        project_name,
-        "-c",
-        f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\"",
-    ]
+    cfg = load_project_config(project_name)
+    if cfg.container_user == "root":
+        command = [
+            "kubectl",
+            "-n",
+            project_name,
+            "exec",
+            *exec_flags,
+            pod,
+            "--",
+            "sh",
+            "-lc",
+            f"cd {shlex.quote(work_dir)} 2>/dev/null || cd {shlex.quote(cfg.container_home)}; exec \"${{SHELL:-/bin/sh}}\"",
+        ]
+    else:
+        command = [
+            "kubectl",
+            "-n",
+            project_name,
+            "exec",
+            *exec_flags,
+            pod,
+            "--",
+            "su",
+            "-",
+            cfg.container_user,
+            "-c",
+            f"cd {shlex.quote(work_dir)} 2>/dev/null || cd ~; exec \"${{SHELL:-/bin/sh}}\"",
+        ]
     while True:
         data = get_pod_json(project_name, pod)
         statuses = data.get("status", {}).get("containerStatuses") or []
@@ -1244,8 +1271,8 @@ def find_first_existing(paths: Iterable[Path]) -> Path | None:
     return None
 
 
-def gather_agent_auth_files(project_name: str) -> list[AgentAuthFile]:
-    container_home = f"/home/{project_name}"
+def gather_agent_auth_files(project_name: str, container_home: str | None = None) -> list[AgentAuthFile]:
+    container_home = container_home or f"/home/{project_name}"
     auth_files: list[AgentAuthFile] = []
 
     codex_auth_path = SECRETS_DIR / "codex" / "auth.json"
@@ -1313,6 +1340,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         "mount_path": initial.mount_path if initial else "",
         "runtime_class": initial.runtime_class if initial else "kata-qemu",
         "base_image": initial.base_image if initial else "debian:trixie-slim",
+        "runtime_user": initial.runtime_user if initial else "",
         "extra_packages": extra_defaults,
         "cpu": initial.cpu if initial else "2",
         "memory": initial.memory if initial else "4Gi",
@@ -1502,7 +1530,9 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
                 index -= 1
 
     extra_words = str(state["extra_packages"]).split()
-    state["auth_files"] = gather_agent_auth_files(str(state["project_name"]))
+    runtime_user = str(state["runtime_user"])
+    container_home = "/root" if runtime_user == "root" else f"/home/{runtime_user or state['project_name']}"
+    state["auth_files"] = gather_agent_auth_files(str(state["project_name"]), container_home)
     all_packages = sort_unique_words((baseline_packages() + " " + " ".join(extra_words)).split())
 
     return AgentConfig(
@@ -1511,6 +1541,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         mount_path=str(state["mount_path"]),
         runtime_class=str(state["runtime_class"]),
         base_image=str(state["base_image"]),
+        runtime_user=str(state["runtime_user"]),
         cpu=str(state["cpu"]),
         memory=str(state["memory"]),
         storage=str(state["storage"]),
