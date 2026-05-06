@@ -1130,17 +1130,28 @@ def print_paseo_pairing_info(project_name: str, pod: str) -> None:
         print(indent_block(str(qr), 4))
 
 
+def kubectl_exec_args_for_terminal() -> list[str]:
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        return ["-it"]
+    if sys.stdin.isatty():
+        return ["-i"]
+    return []
+
+
 def attach_to_project_pod(project_name: str, pod: str, work_dir: str, agent_cmd: str) -> None:
     ok(f"Attaching to {pod}...")
     maybe_start_log_stream(project_name, pod)
     stop_log_stream()
     deadline = time.time() + 180
+    exec_flags = kubectl_exec_args_for_terminal()
+    if "-t" not in "".join(exec_flags):
+        hint("No local TTY detected; using a non-interactive exec session.")
     command = [
         "kubectl",
         "-n",
         project_name,
         "exec",
-        "-it",
+        *exec_flags,
         pod,
         "--",
         "su",

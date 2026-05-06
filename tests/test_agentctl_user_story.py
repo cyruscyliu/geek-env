@@ -15,6 +15,7 @@ from scripts.agentctl import (
     build_paseo_bootstrap_line,
     gather_agent_auth_files,
     is_valid_project_name,
+    kubectl_exec_args_for_terminal,
     sanitize_codex_config_toml,
     restore_files,
     snapshot_files,
@@ -355,6 +356,16 @@ trust_level = "trusted"
         for legacy_marker in ("setup-zsh.sh", "setup-nvim.sh", "setup-tmux.sh", "usermod -s"):
             with self.subTest(marker=legacy_marker):
                 self.assertNotIn(legacy_marker, rendered)
+
+    def test_kubectl_exec_uses_tty_only_when_terminal_is_available(self) -> None:
+        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):
+            self.assertEqual(kubectl_exec_args_for_terminal(), ["-it"])
+
+        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=False):
+            self.assertEqual(kubectl_exec_args_for_terminal(), ["-i"])
+
+        with patch("sys.stdin.isatty", return_value=False), patch("sys.stdout.isatty", return_value=False):
+            self.assertEqual(kubectl_exec_args_for_terminal(), [])
 
 
 if __name__ == "__main__":
