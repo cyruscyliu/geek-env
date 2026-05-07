@@ -30,6 +30,23 @@ For tool-specific usage details, see:
 If you want to extend the underlying k3s/Kata setup to more hosts, see
 [`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
 
+## TODO
+
+- add a custom base image workflow for agent pods so system packages and other
+  image-level changes persist across pod restarts instead of being reinstalled
+  at bootstrap time
+
+## Pitfalls
+
+- do not rely on ad hoc `apt-get install` inside a running agent container for
+  persistent tooling; only the project home on the PVC persists, while `/usr`,
+  `/etc`, and the package database are recreated from the base image on restart
+- do not build with `make -j$(nproc)` inside Kata guests for heavy workloads
+  such as Buildroot; `$(nproc)` reflects visible CPUs, but max parallelism can
+  overdrive the guest VM and trigger Kata agent timeouts or sandbox restarts.
+  Prefer a conservative value such as `-j2` or `-j4` unless you have verified
+  the workload is stable with more parallelism
+
 ## Contribute
 
 - update docs when behavior changes
