@@ -472,6 +472,9 @@ class AgentConfig:
     persist_state: bool = True
     bootstrap_profile: str = "full"
     install_rustup: bool = False
+    git_core_editor: str = ""
+    git_user_name: str = ""
+    git_user_email: str = ""
     plain_env_vars: list[PlainEnvVar] = field(default_factory=list)
     auth_files: list[AgentAuthFile] = field(default_factory=list)
     expose_service: bool = False
@@ -521,6 +524,9 @@ class AgentConfig:
                 "bootstrap_profile": self.bootstrap_profile,
                 "apt_packages": self.all_packages.split(),
                 "install_rustup": self.install_rustup,
+                "git_core_editor": self.git_core_editor or None,
+                "git_user_name": self.git_user_name or None,
+                "git_user_email": self.git_user_email or None,
             },
             "auth": {
                 "files": [
@@ -594,6 +600,9 @@ class AgentConfig:
             bootstrap_profile=tooling.get("bootstrap_profile", "full"),
             all_packages=" ".join(tooling.get("apt_packages", []) or []),
             install_rustup=bool(tooling.get("install_rustup", False)),
+            git_core_editor=str(tooling.get("git_core_editor") or ""),
+            git_user_name=str(tooling.get("git_user_name") or ""),
+            git_user_email=str(tooling.get("git_user_email") or ""),
             plain_env_vars=[PlainEnvVar(name, value) for name, value in plain.items()],
             auth_files=[
                 AgentAuthFile(
@@ -638,14 +647,34 @@ class AgentConfig:
         auth_copy_lines = build_auth_copy_lines(user, self.auth_files)
         ssh_keygen_line = build_ssh_keygen_line(user, home)
         paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
+        git_config_line = ""
+        if self.git_core_editor:
+            git_config_line = (
+                f"          git config --global core.editor {shlex.quote(self.git_core_editor)} && \\\n"
+            )
+        if self.git_user_name:
+            git_config_line += (
+                f"          git config --global user.name {shlex.quote(self.git_user_name)} && \\\n"
+            )
+        if self.git_user_email:
+            git_config_line += (
+                f"          git config --global user.email {shlex.quote(self.git_user_email)} && \\\n"
+            )
         return (
             "          set -eux && \\\n"
             f"{user_setup_line}{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
             f"            openssh-client {self.all_packages} && \\\n"
-            f"{sudoers_line}{rustup_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
+            f"{sudoers_line}{rustup_line}{git_config_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
+
+    def build_readiness_probe_command(self) -> list[str]:
+        return [
+            "sh",
+            "-ec",
+            f'test -f /tmp/.ready && grep -q " {self.container_home} " /proc/self/mountinfo',
+        ]
 
     def yaml_text(self) -> str:
         docs: list[str] = [
@@ -709,7 +738,7 @@ class AgentConfig:
             self.build_container_bootstrap_lines(),
             "        readinessProbe:",
             "          exec:",
-            '            command: ["test", "-f", "/tmp/.ready"]',
+            f"            command: {json.dumps(self.build_readiness_probe_command())}",
             "          initialDelaySeconds: 5",
             "          periodSeconds: 5",
             "          failureThreshold: 60",

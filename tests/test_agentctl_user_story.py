@@ -42,6 +42,9 @@ class UserStoryGraphTest(unittest.TestCase):
             "all_packages": "",
             "bootstrap_profile": "full",
             "install_rustup": False,
+            "git_core_editor": "",
+            "git_user_name": "",
+            "git_user_email": "",
             "plain_env_vars": [],
             "auth_files": [],
             "expose_service": False,
@@ -135,6 +138,9 @@ trust_level = "trusted"
             "persist_state",
             "bootstrap_profile",
             "all_packages",
+            "git_core_editor",
+            "git_user_name",
+            "git_user_email",
             "container_port",
             "node_port",
         ):
@@ -346,6 +352,31 @@ trust_level = "trusted"
         for legacy_marker in ("setup-zsh.sh", "setup-nvim.sh", "setup-tmux.sh", "usermod -s"):
             with self.subTest(marker=legacy_marker):
                 self.assertNotIn(legacy_marker, rendered)
+
+    def test_full_bootstrap_can_set_git_core_editor(self) -> None:
+        cfg = self.make_agent_config(git_core_editor="vi")
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertIn("git config --global core.editor vi", rendered)
+
+    def test_full_bootstrap_can_set_git_identity(self) -> None:
+        cfg = self.make_agent_config(
+            git_user_name="Qiang Liu",
+            git_user_email="cyruscyliu@gmail.com",
+        )
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertIn("git config --global user.name 'Qiang Liu'", rendered)
+        self.assertIn("git config --global user.email cyruscyliu@gmail.com", rendered)
+
+    def test_readiness_probe_checks_ready_file_and_pvc_mount(self) -> None:
+        cfg = self.make_agent_config()
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn('command: ["sh", "-ec", "test -f /tmp/.ready && grep -q \\" /home/fight-cuttlefish-x64 \\" /proc/self/mountinfo"]', rendered)
 
     def test_apply_saved_project_waits_for_rollout_when_template_changes(self) -> None:
         cfg = self.make_agent_config()
