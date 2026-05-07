@@ -35,6 +35,9 @@ class UserStoryGraphTest(unittest.TestCase):
             "cpu": "2",
             "memory": "4Gi",
             "storage": "20Gi",
+            "cpu_request": "",
+            "memory_request": "",
+            "storage_request": "",
             "agent": "None",
             "agent_cmd": "",
             "agent_args": "",
@@ -109,6 +112,9 @@ trust_level = "trusted"
             cpu="12",
             memory="12Gi",
             storage="80Gi",
+            cpu_request="4",
+            memory_request="8Gi",
+            storage_request="20Gi",
             persist_state=True,
             all_packages="bat bubblewrap curl git nodejs npm python3 ripgrep sudo wget",
             plain_env_vars=[PlainEnvVar("FOO", "bar")],
@@ -133,6 +139,9 @@ trust_level = "trusted"
             "cpu",
             "memory",
             "storage",
+            "cpu_request",
+            "memory_request",
+            "storage_request",
             "agent_cmd",
             "agent_args",
             "persist_state",
@@ -185,6 +194,21 @@ trust_level = "trusted"
         self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
         self.assertIn("subPath: .paseo", rendered)
         self.assertNotIn("hostPath:", rendered)
+
+    def test_burstable_resources_render_requests_separately_from_limits(self) -> None:
+        cfg = self.make_agent_config(
+            cpu="12",
+            memory="16Gi",
+            storage="50Gi",
+            cpu_request="4",
+            memory_request="8Gi",
+            storage_request="20Gi",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn('          limits:\n            memory: "16Gi"\n            cpu: "12"\n            ephemeral-storage: "50Gi"', rendered)
+        self.assertIn('          requests:\n            memory: "8Gi"\n            cpu: "4"\n            ephemeral-storage: "20Gi"', rendered)
 
     def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
         cfg = self.make_agent_config(
@@ -306,11 +330,36 @@ trust_level = "trusted"
         rendered = cfg.build_container_bootstrap_lines()
         self.assertIn("NOPASSWD: ALL", rendered)
 
+    def test_prebuilt_bootstrap_skips_package_and_cli_install(self) -> None:
+        cfg = self.make_agent_config(
+            bootstrap_profile="prebuilt",
+            git_core_editor="vi",
+            git_user_name="Qiang Liu",
+            git_user_email="cyruscyliu@gmail.com",
+        )
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertNotIn("apt-get update", rendered)
+        self.assertNotIn("npm install -g --prefix /opt/agent-cli @openai/codex", rendered)
+        self.assertNotIn("npm install -g --prefix /opt/agent-cli pnpm", rendered)
+        self.assertIn("git config --global core.editor vi", rendered)
+        self.assertIn("paseo daemon start", rendered)
+
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
         rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
         self.assertIn(f"rm -f /home/{self.PROJECT}/.paseo/paseo.pid", rendered)
         self.assertIn("paseo daemon start", rendered)
         self.assertIn("paseo daemon pair --json", rendered)
+
+    def test_full_bootstrap_pins_paseo_version(self) -> None:
+        cfg = self.make_agent_config()
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertIn("Paseo-0.1.70-beta.1-amd64.deb", rendered)
+        self.assertIn("apt-get install -y /tmp/paseo.deb", rendered)
+        self.assertIn("ln -sf /opt/Paseo/resources/bin/paseo /usr/local/bin/paseo", rendered)
 
     def test_paseo_runtime_cleanup_removes_only_stale_pid(self) -> None:
         rendered = build_paseo_runtime_cleanup_line(f"/home/{self.PROJECT}")
@@ -370,6 +419,15 @@ trust_level = "trusted"
 
         self.assertIn("git config --global user.name 'Qiang Liu'", rendered)
         self.assertIn("git config --global user.email cyruscyliu@gmail.com", rendered)
+
+    def test_pnpm_is_installed_via_npm_not_apt(self) -> None:
+        cfg = self.make_agent_config(all_packages="nodejs npm pnpm python3")
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertNotIn("apt-get install -y \\\n            openssh-client nodejs npm pnpm python3", rendered)
+        self.assertIn("apt-get install -y \\\n            openssh-client nodejs npm python3", rendered)
+        self.assertIn("npm install -g --prefix /opt/agent-cli pnpm", rendered)
 
     def test_readiness_probe_checks_ready_file_and_pvc_mount(self) -> None:
         cfg = self.make_agent_config()

@@ -30,6 +30,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 OUTPUT_DIR = REPO_ROOT / "agents"
 SECRETS_DIR = REPO_ROOT / "secrets" / "agentctl"
+PASEO_RELEASE_VERSION = "0.1.70-beta.1"
+PASEO_DEB_URL = (
+    "https://github.com/getpaseo/paseo/releases/download/"
+    f"v{PASEO_RELEASE_VERSION}/Paseo-{PASEO_RELEASE_VERSION}-amd64.deb"
+)
 
 BOLD = "\033[1m"
 CYAN = "\033[36m"
@@ -313,12 +318,28 @@ def build_agent_install_line(agent_pkg: str) -> str:
     )
 
 
+def split_pnpm_package(packages: str) -> tuple[str, bool]:
+    words = packages.split()
+    kept = [word for word in words if word != "pnpm"]
+    return " ".join(kept), ("pnpm" in words)
+
+
+def build_pnpm_install_line(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return (
+        "          echo 'installing pnpm' && \\\n"
+        "          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli pnpm && \\\n"
+    )
+
+
 def build_paseo_install_line(enabled: bool) -> str:
     if not enabled:
         return ""
     return (
-        "          echo 'installing @getpaseo/cli' && \\\n"
-        "          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli @getpaseo/cli && \\\n"
+        f"          echo 'installing Paseo v{PASEO_RELEASE_VERSION}' && \\\n"
+        f"          curl -fsSL {shlex.quote(PASEO_DEB_URL)} -o /tmp/paseo.deb && \\\n"
+        "          apt-get install -y /tmp/paseo.deb && rm -f /tmp/paseo.deb && \\\n"
     )
 
 
@@ -326,9 +347,7 @@ def build_paseo_wrapper_line(enabled: bool) -> str:
     if not enabled:
         return ""
     return (
-        "          printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' "
-        "'exec /opt/agent-cli/bin/paseo \"$@\"' > /usr/local/bin/paseo "
-        "&& chmod 755 /usr/local/bin/paseo && \\\n"
+        "          ln -sf /opt/Paseo/resources/bin/paseo /usr/local/bin/paseo && \\\n"
     )
 
 
@@ -384,16 +403,16 @@ def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_ho
         return (
             f"{build_paseo_runtime_cleanup_line(container_home)}"
             "          echo 'starting paseo daemon' && \\\n"
-            f"          PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start && \\\n"
+            f"          PASEO_HOME={container_home}/.paseo paseo daemon start && \\\n"
             "          echo 'pairing paseo daemon' && \\\n"
-            f"          paired=0; for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test \"$paired\" = 1 && \\\n"
+            f"          paired=0; for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test \"$paired\" = 1 && \\\n"
         )
     return (
         f"{build_paseo_runtime_cleanup_line(container_home)}"
         "          echo 'starting paseo daemon' && \\\n"
-        f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon start" && \\\n'
+        f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo paseo daemon start" && \\\n'
         "          echo 'pairing paseo daemon' && \\\n"
-        f'          su - {container_user} -c "for i in \\$(seq 1 30); do PASEO_HOME={container_home}/.paseo /opt/agent-cli/bin/paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
+        f'          su - {container_user} -c "for i in \\$(seq 1 30); do PASEO_HOME={container_home}/.paseo paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
 
 
@@ -468,6 +487,9 @@ class AgentConfig:
     agent_cmd: str
     agent_args: str
     all_packages: str
+    cpu_request: str = ""
+    memory_request: str = ""
+    storage_request: str = ""
     runtime_user: str = ""
     persist_state: bool = True
     bootstrap_profile: str = "full"
@@ -513,6 +535,9 @@ class AgentConfig:
                 "cpu": self.cpu,
                 "memory": self.memory,
                 "ephemeral_storage": self.storage,
+                "cpu_request": self.cpu_request or None,
+                "memory_request": self.memory_request or None,
+                "ephemeral_storage_request": self.storage_request or None,
             },
             "agent": {
                 "kind": self.agent_cmd or "none",
@@ -593,6 +618,13 @@ class AgentConfig:
             cpu=str(resources.get("cpu", "2")),
             memory=normalize_binary_quantity(str(resources.get("memory", "4Gi")), "Saved memory limit"),
             storage=normalize_binary_quantity(str(resources.get("ephemeral_storage", "20Gi")), "Saved storage limit"),
+            cpu_request=str(resources.get("cpu_request") or ""),
+            memory_request=normalize_binary_quantity(str(resources.get("memory_request", "")), "Saved memory request")
+            if resources.get("memory_request")
+            else "",
+            storage_request=normalize_binary_quantity(str(resources.get("ephemeral_storage_request", "")), "Saved storage request")
+            if resources.get("ephemeral_storage_request")
+            else "",
             agent=label,
             agent_cmd="" if kind == "none" else kind,
             agent_args=" ".join(args),
@@ -621,6 +653,7 @@ class AgentConfig:
     def build_container_bootstrap_lines(self) -> str:
         user = self.container_user
         home = self.container_home
+        apt_packages, install_pnpm = split_pnpm_package(self.all_packages)
         user_setup_line = ""
         sudoers_line = ""
         rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \\\n"
@@ -634,11 +667,34 @@ class AgentConfig:
                 f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}"
                 "          touch /tmp/.ready && sleep infinity"
             )
+        if self.bootstrap_profile == "prebuilt":
+            auth_copy_lines = build_auth_copy_lines(user, self.auth_files)
+            ssh_keygen_line = build_ssh_keygen_line(user, home)
+            paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
+            git_config_line = ""
+            if self.git_core_editor:
+                git_config_line = (
+                    f"          git config --global core.editor {shlex.quote(self.git_core_editor)} && \\\n"
+                )
+            if self.git_user_name:
+                git_config_line += (
+                    f"          git config --global user.name {shlex.quote(self.git_user_name)} && \\\n"
+                )
+            if self.git_user_email:
+                git_config_line += (
+                    f"          git config --global user.email {shlex.quote(self.git_user_email)} && \\\n"
+                )
+            return (
+                "          set -eux && \\\n"
+                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{git_config_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
+                "          touch /tmp/.ready && sleep infinity"
+            )
         agent_install_line = (
             build_agent_install_line(agent_package_for_cmd("codex"))
             + build_agent_install_line(agent_package_for_cmd("claude"))
         )
         paseo_install_line = build_paseo_install_line(True)
+        pnpm_install_line = build_pnpm_install_line(install_pnpm)
         paseo_wrapper_line = build_paseo_wrapper_line(True)
         agent_wrapper_line = (
             build_agent_wrapper_line("codex", "")
@@ -664,8 +720,8 @@ class AgentConfig:
             "          set -eux && \\\n"
             f"{user_setup_line}{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
-            f"            openssh-client {self.all_packages} && \\\n"
-            f"{sudoers_line}{rustup_line}{git_config_line}{agent_install_line}{paseo_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
+            f"            openssh-client {apt_packages} && \\\n"
+            f"{sudoers_line}{rustup_line}{git_config_line}{agent_install_line}{paseo_install_line}{pnpm_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -747,10 +803,29 @@ class AgentConfig:
             f'            memory: "{self.memory}"',
             f'            cpu: "{self.cpu}"',
             f'            ephemeral-storage: "{self.storage}"',
+        ]
+        if self.cpu_request or self.memory_request or self.storage_request:
+            deployment_lines.extend(
+                [
+                    "          requests:",
+                    *(
+                        [f'            memory: "{self.memory_request}"'] if self.memory_request else []
+                    ),
+                    *([f'            cpu: "{self.cpu_request}"'] if self.cpu_request else []),
+                    *(
+                        [f'            ephemeral-storage: "{self.storage_request}"']
+                        if self.storage_request
+                        else []
+                    ),
+                ]
+            )
+        deployment_lines.extend(
+            [
             "        volumeMounts:",
             "        - name: project",
             f"          mountPath: {self.container_home}",
-        ]
+            ]
+        )
         if self.agent_cmd:
             deployment_lines.extend(
                 [
