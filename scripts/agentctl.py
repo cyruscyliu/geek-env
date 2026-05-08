@@ -717,6 +717,7 @@ class AgentConfig:
                 git_config_line = (
                     f"          git config --global core.editor {shlex.quote(self.git_core_editor)} && \\\n"
                 )
+            git_config_line += "          git config --global pull.rebase true && \\\n"
             if self.git_user_name:
                 git_config_line += (
                     f"          git config --global user.name {shlex.quote(self.git_user_name)} && \\\n"
@@ -749,6 +750,7 @@ class AgentConfig:
             git_config_line = (
                 f"          git config --global core.editor {shlex.quote(self.git_core_editor)} && \\\n"
             )
+        git_config_line += "          git config --global pull.rebase true && \\\n"
         if self.git_user_name:
             git_config_line += (
                 f"          git config --global user.name {shlex.quote(self.git_user_name)} && \\\n"

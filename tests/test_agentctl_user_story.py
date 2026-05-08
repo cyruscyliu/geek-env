@@ -403,6 +403,7 @@ trust_level = "trusted"
         self.assertNotIn("npm install -g --prefix /opt/agent-cli @openai/codex", rendered)
         self.assertNotIn("npm install -g --prefix /opt/agent-cli pnpm", rendered)
         self.assertIn("git config --global core.editor vi", rendered)
+        self.assertIn("git config --global pull.rebase true", rendered)
         self.assertIn("paseo daemon start", rendered)
 
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
@@ -419,6 +420,7 @@ trust_level = "trusted"
         self.assertIn("Paseo-0.1.70-beta.1-amd64.deb", rendered)
         self.assertIn("apt-get install -y /tmp/paseo.deb", rendered)
         self.assertIn("ln -sf /opt/Paseo/resources/bin/paseo /usr/local/bin/paseo", rendered)
+        self.assertIn("git config --global pull.rebase true", rendered)
 
     def test_paseo_runtime_cleanup_removes_only_stale_pid(self) -> None:
         rendered = build_paseo_runtime_cleanup_line(f"/home/{self.PROJECT}")
